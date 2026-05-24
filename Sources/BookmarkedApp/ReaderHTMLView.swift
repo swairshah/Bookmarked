@@ -6,21 +6,21 @@ struct ReaderHTMLView: NSViewRepresentable {
     let html: String
     let baseURL: URL?
     let fontChoice: ReaderFontChoice
-    var onDoubleClick: (() -> Void)?
+    var onEditSource: (() -> Void)?
     var onElementRemoved: ((String) -> Void)?
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
         configuration.userContentController.add(context.coordinator, name: "readerEdit")
-        let view = DoubleClickWebView(frame: .zero, configuration: configuration)
+        let view = ReaderWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")
-        view.onDoubleClick = { context.coordinator.onDoubleClick?() }
+        view.onEditSource = { context.coordinator.onEditSource?() }
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.onDoubleClick = onDoubleClick
+        context.coordinator.onEditSource = onEditSource
         context.coordinator.onElementRemoved = onElementRemoved
         let document = """
         <!doctype html>
@@ -140,7 +140,7 @@ struct ReaderHTMLView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKScriptMessageHandler {
         var lastHTML: String?
-        var onDoubleClick: (() -> Void)?
+        var onEditSource: (() -> Void)?
         var onElementRemoved: ((String) -> Void)?
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -160,27 +160,18 @@ struct ReaderHTMLView: NSViewRepresentable {
     }
 }
 
-private final class DoubleClickWebView: WKWebView {
-    var onDoubleClick: (() -> Void)?
+private final class ReaderWebView: WKWebView {
+    var onEditSource: (() -> Void)?
 
     override func rightMouseDown(with event: NSEvent) {
         evaluateJavaScript("window.getSelection && window.getSelection().removeAllRanges();")
         super.rightMouseDown(with: event)
     }
 
-    override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 {
-            onDoubleClick?()
-            return
-        }
-
-        super.mouseDown(with: event)
-    }
-
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        if menu.items.contains(where: { $0.action == #selector(removeContextElement) }) {
+        if menu.items.contains(where: { $0.action == #selector(editReaderSource) }) {
             return
         }
 
@@ -188,12 +179,20 @@ private final class DoubleClickWebView: WKWebView {
             menu.insertItem(.separator(), at: 0)
         }
 
-        let item = NSMenuItem(title: "Remove Element", action: #selector(removeContextElement), keyEquivalent: "")
-        item.target = self
-        menu.insertItem(item, at: 0)
+        let remove = NSMenuItem(title: "Remove Element", action: #selector(removeContextElement), keyEquivalent: "")
+        remove.target = self
+        menu.insertItem(remove, at: 0)
+
+        let edit = NSMenuItem(title: "Edit Reader Source", action: #selector(editReaderSource), keyEquivalent: "")
+        edit.target = self
+        menu.insertItem(edit, at: 0)
     }
 
     @objc private func removeContextElement() {
         evaluateJavaScript("window.bookmarkedRemoveContextElement && window.bookmarkedRemoveContextElement();")
+    }
+
+    @objc private func editReaderSource() {
+        onEditSource?()
     }
 }

@@ -266,13 +266,13 @@ struct EditableReaderView: View {
                 html: html,
                 baseURL: item.url,
                 fontChoice: fontChoice,
-                onDoubleClick: beginEditing,
+                onEditSource: beginEditing,
                 onElementRemoved: { updatedHTML in
                     store.saveReaderEdits(for: item.id, text: updatedHTML, isHTML: true)
                 }
             )
         } else {
-            ReaderContentView(text: item.contentText, fontChoice: fontChoice, onDoubleClick: beginEditing)
+            ReaderContentView(text: item.contentText, fontChoice: fontChoice, onEditSource: beginEditing)
         }
     }
 
