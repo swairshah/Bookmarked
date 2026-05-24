@@ -109,30 +109,36 @@ struct MainWindowView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
 
-            List(selection: $controller.selection) {
-                ForEach(results) { item in
-                    BookmarkRow(item: item)
-                        .tag(item.id)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                        .contextMenu {
-                            Button("Open") { store.open(item) }
-                            Button("Refresh Index") { store.refresh(item) }
-                            Divider()
-                            Button("Delete", role: .destructive) { store.delete(item) }
-                        }
-                        .onTapGesture(count: 2) {
-                            store.open(item)
-                        }
-                        .onAppear {
-                            store.ensureAssets(for: item)
-                        }
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(results) { item in
+                        BookmarkRow(item: item)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(controller.selection == item.id ? Color.accentColor : Color.clear)
+                            )
+                            .foregroundStyle(controller.selection == item.id ? Color.white : Color.primary)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                controller.selection = item.id
+                            }
+                            .contextMenu {
+                                Button("Open") { store.open(item) }
+                                Button("Refresh Index") { store.refresh(item) }
+                                Divider()
+                                Button("Delete", role: .destructive) { store.delete(item) }
+                            }
+                            .onAppear {
+                                store.ensureAssets(for: item)
+                            }
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .background(Color.clear)
-            .environment(\.defaultMinListRowHeight, 34)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -379,6 +385,8 @@ struct BookmarkRow: View {
             }
         }
         .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private var kindColor: Color {
@@ -535,13 +543,10 @@ struct BookmarkDetailView: View {
             }
         case .webPage, .githubRepo:
             if let url = item.url {
-                ZStack {
-                    textReader
-                        .opacity(previewMode == .reader ? 1 : 0)
-                        .allowsHitTesting(previewMode == .reader)
+                if previewMode == .web {
                     WebPreview(url: url)
-                        .opacity(previewMode == .web ? 1 : 0)
-                        .allowsHitTesting(previewMode == .web)
+                } else {
+                    textReader
                 }
             } else {
                 textReader
