@@ -41,4 +41,20 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertEqual(blocks[2].kind, .bullet)
         XCTAssertEqual(blocks[3].kind, .bullet)
     }
+
+    func testFaviconCandidatesParseDataAndRelativeIcons() {
+        let html = """
+        <html><head>
+        <link rel="stylesheet" href="/style.css">
+        <link rel="shortcut icon" href="data:image/svg+xml,&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;&lt;/svg&gt;">
+        <link rel="apple-touch-icon" href="/touch.png">
+        </head></html>
+        """
+
+        let candidates = FaviconFetcher.iconCandidates(in: html, baseURL: URL(string: "https://example.com/posts/a")!)
+
+        XCTAssertEqual(candidates.count, 2)
+        XCTAssertEqual(candidates[0], .dataURI("data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"))
+        XCTAssertEqual(candidates[1], .remote(URL(string: "https://example.com/touch.png")!))
+    }
 }

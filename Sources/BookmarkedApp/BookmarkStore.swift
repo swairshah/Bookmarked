@@ -131,11 +131,12 @@ final class BookmarkStore: ObservableObject {
     }
 
     func ensureAssets(for item: BookmarkItem) {
-        if item.faviconData == nil, let url = item.url {
+        let hasValidFavicon = item.faviconData.map(FaviconFetcher.isRenderableImage) ?? false
+        if !hasValidFavicon, let url = item.url {
             Task {
                 guard let data = await FaviconFetcher.fetch(for: url) else { return }
                 await MainActor.run {
-                    guard let idx = self.items.firstIndex(where: { $0.id == item.id }), self.items[idx].faviconData == nil else { return }
+                    guard let idx = self.items.firstIndex(where: { $0.id == item.id }) else { return }
                     self.items[idx].faviconData = data
                     self.items[idx].updatedAt = Date()
                     self.scheduleSave()
