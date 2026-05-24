@@ -6,6 +6,7 @@ final class MainWindowController: ObservableObject {
     static let shared = MainWindowController()
 
     @Published var selection: UUID?
+    @Published var isFullScreen = false
 
     private var window: NSWindow?
     private var delegate: WindowDelegate?
@@ -41,7 +42,10 @@ final class MainWindowController: ObservableObject {
         let delegate = WindowDelegate(onClose: { [weak self] in
             self?.window = nil
             self?.delegate = nil
+            self?.isFullScreen = false
             NSApp.setActivationPolicy(.accessory)
+        }, onFullScreenChange: { [weak self] isFullScreen in
+            self?.isFullScreen = isFullScreen
         })
         window.delegate = delegate
         self.delegate = delegate
@@ -92,12 +96,22 @@ private final class BookmarkedWindow: NSWindow {
 
 private final class WindowDelegate: NSObject, NSWindowDelegate {
     let onClose: () -> Void
+    let onFullScreenChange: (Bool) -> Void
 
-    init(onClose: @escaping () -> Void) {
+    init(onClose: @escaping () -> Void, onFullScreenChange: @escaping (Bool) -> Void) {
         self.onClose = onClose
+        self.onFullScreenChange = onFullScreenChange
     }
 
     func windowWillClose(_ notification: Notification) {
         onClose()
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        onFullScreenChange(true)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        onFullScreenChange(false)
     }
 }

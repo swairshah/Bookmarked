@@ -2,6 +2,13 @@ import SwiftUI
 import WebKit
 import AVKit
 
+private enum BookmarkPreviewMode: String, CaseIterable, Identifiable {
+    case reader = "Reader"
+    case web = "Web"
+
+    var id: String { rawValue }
+}
+
 struct MainWindowView: View {
     @ObservedObject var store: BookmarkStore
     @ObservedObject var controller: MainWindowController
@@ -17,15 +24,21 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            Divider()
-            HStack(spacing: 0) {
-                sidebar
-                    .frame(width: sidebarWidth)
-                ResizableSidebarDivider(width: $sidebarWidth)
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            if controller.isFullScreen, let selectedItem {
+                FullScreenReaderView(item: selectedItem, store: store)
+            } else {
+                VStack(spacing: 0) {
+                    topBar
+                    Divider()
+                    HStack(spacing: 0) {
+                        sidebar
+                            .frame(width: sidebarWidth)
+                        ResizableSidebarDivider(width: $sidebarWidth)
+                        detail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -134,6 +147,75 @@ struct MainWindowView: View {
 
 }
 
+struct FullScreenReaderView: View {
+    let item: BookmarkItem
+    @ObservedObject var store: BookmarkStore
+    @State private var previewMode: BookmarkPreviewMode = .reader
+    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
+
+    private var readerFontChoice: ReaderFontChoice {
+        ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            preview
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if canShowWeb {
+                Picker("", selection: $previewMode) {
+                    ForEach(BookmarkPreviewMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+                .padding(10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.top, 16)
+                .padding(.trailing, 18)
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .onAppear {
+            store.ensureAssets(for: item)
+        }
+        .onChange(of: item.id) { _ in
+            previewMode = .reader
+        }
+    }
+
+    private var canShowWeb: Bool {
+        item.url != nil && (item.kind == .webPage || item.kind == .githubRepo)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if canShowWeb, let url = item.url {
+            ZStack {
+                textReader
+                    .opacity(previewMode == .reader ? 1 : 0)
+                    .allowsHitTesting(previewMode == .reader)
+                WebPreview(url: url)
+                    .opacity(previewMode == .web ? 1 : 0)
+                    .allowsHitTesting(previewMode == .web)
+            }
+        } else {
+            textReader
+        }
+    }
+
+    @ViewBuilder
+    private var textReader: some View {
+        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ReaderHTMLView(title: item.title, html: html, baseURL: item.url, fontChoice: readerFontChoice)
+        } else {
+            ReaderContentView(text: item.contentText, fontChoice: readerFontChoice)
+        }
+    }
+}
+
 struct BookmarkRow: View {
     let item: BookmarkItem
 
@@ -179,16 +261,9 @@ struct BookmarkRow: View {
 struct BookmarkDetailView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
-    @State private var previewMode: PreviewMode = .reader
+    @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var showingSettings = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
-
-    private enum PreviewMode: String, CaseIterable, Identifiable {
-        case reader = "Reader"
-        case web = "Web"
-
-        var id: String { rawValue }
-    }
 
     private var readerFontChoice: ReaderFontChoice {
         get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
@@ -242,7 +317,7 @@ struct BookmarkDetailView: View {
 
                 if item.url != nil && (item.kind == .webPage || item.kind == .githubRepo) {
                     Picker("", selection: $previewMode) {
-                        ForEach(PreviewMode.allCases) { mode in
+                        ForEach(BookmarkPreviewMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
                     }
