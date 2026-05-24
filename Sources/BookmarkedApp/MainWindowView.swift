@@ -1,0 +1,516 @@
+import SwiftUI
+import WebKit
+import AVKit
+
+struct MainWindowView: View {
+    @ObservedObject var store: BookmarkStore
+    @ObservedObject var controller: MainWindowController
+    @State private var query = ""
+    @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
+
+    private var results: [BookmarkItem] {
+        store.search(query)
+    }
+
+    private var selectedItem: BookmarkItem? {
+        store.item(id: controller.selection) ?? results.first
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            topBar
+            Divider()
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: sidebarWidth)
+                ResizableSidebarDivider(width: $sidebarWidth)
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if controller.selection == nil {
+                controller.selection = results.first?.id
+            }
+        }
+        .onChange(of: results) { newValue in
+            if let selection = controller.selection, newValue.contains(where: { $0.id == selection }) {
+                return
+            }
+            controller.selection = newValue.first?.id
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            AppBrandIcon(size: 24)
+
+            Text("Bookmarked")
+                .font(.system(size: 18, weight: .semibold))
+
+            TextField("Search content, creator, date, source, or URL", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 520)
+
+            Spacer()
+
+            if store.isCapturing {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Capturing")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            controller.toggleZoom()
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(results.count) bookmarks")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let status = store.statusMessage {
+                    Text(status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+
+            List(selection: $controller.selection) {
+                ForEach(results) { item in
+                    BookmarkRow(item: item)
+                        .tag(item.id)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                        .contextMenu {
+                            Button("Open") { store.open(item) }
+                            Button("Refresh Index") { store.refresh(item) }
+                            Divider()
+                            Button("Delete", role: .destructive) { store.delete(item) }
+                        }
+                        .onTapGesture(count: 2) {
+                            store.open(item)
+                        }
+                        .onAppear {
+                            store.ensureAssets(for: item)
+                        }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .environment(\.defaultMinListRowHeight, 34)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if let selectedItem {
+            BookmarkDetailView(item: selectedItem, store: store)
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "bookmark.slash")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.tertiary)
+                Text("No bookmark selected")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+}
+
+struct BookmarkRow: View {
+    let item: BookmarkItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            BookmarkIcon(item: item, fallbackColor: kindColor)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(item.kind.rawValue)
+                    if let creator = item.creator, !creator.isEmpty {
+                        Text("·")
+                        Text(creator)
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var kindColor: Color {
+        switch item.kind {
+        case .githubRepo: return .purple
+        case .image: return .pink
+        case .video: return .red
+        case .podcast, .audio: return .blue
+        case .file: return .green
+        case .note: return .gray
+        case .webPage: return .orange
+        }
+    }
+}
+
+struct BookmarkDetailView: View {
+    let item: BookmarkItem
+    @ObservedObject var store: BookmarkStore
+    @State private var previewMode: PreviewMode = .reader
+    @State private var showingSettings = false
+    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
+
+    private enum PreviewMode: String, CaseIterable, Identifiable {
+        case reader = "Reader"
+        case web = "Web"
+
+        var id: String { rawValue }
+    }
+
+    private var readerFontChoice: ReaderFontChoice {
+        get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
+        nonmutating set { readerFontChoiceRaw = newValue.rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            preview
+        }
+        .onChange(of: item.id) { _ in
+            previewMode = .reader
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                if let data = item.faviconData, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .lineLimit(2)
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            store.open(item)
+                        }
+                        .help(item.url != nil || item.fileURL != nil ? "Double-click to open" : "")
+                    HStack(spacing: 8) {
+                        Label(item.kind.rawValue, systemImage: "tag")
+                        if let creator = item.creator, !creator.isEmpty {
+                            Label(creator, systemImage: "person.crop.circle")
+                        }
+                        Label(item.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                Spacer()
+
+                if item.url != nil && (item.kind == .webPage || item.kind == .githubRepo) {
+                    Picker("", selection: $previewMode) {
+                        ForEach(PreviewMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 150)
+                }
+
+                Button {
+                    store.refresh(item)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 22, height: 22)
+                }
+                .frame(width: 54, height: 32)
+                .buttonStyle(.bordered)
+                .help("Refresh indexed content")
+                .disabled(item.url == nil)
+
+                Button {
+                    showingSettings.toggle()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .frame(width: 22, height: 22)
+                }
+                .frame(width: 54, height: 32)
+                .buttonStyle(.bordered)
+                .help("Reader settings")
+                .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
+                    ReaderSettingsPanel(
+                        fontChoice: Binding(
+                            get: { readerFontChoice },
+                            set: { readerFontChoice = $0 }
+                        )
+                    )
+                }
+            }
+
+            if !item.tags.isEmpty {
+                FlowTags(tags: item.tags)
+            }
+        }
+        .padding(18)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear {
+            store.ensureAssets(for: item)
+        }
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        switch item.kind {
+        case .image:
+            if let url = item.url ?? item.fileURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit().padding(16)
+                    case .failure:
+                        textReader
+                    case .empty:
+                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    @unknown default:
+                        textReader
+                    }
+                }
+            } else {
+                textReader
+            }
+        case .video, .podcast, .audio:
+            if let url = item.url ?? item.fileURL {
+                VStack(spacing: 12) {
+                    VideoPlayer(player: AVPlayer(url: url))
+                        .frame(minHeight: 300)
+                    textReader
+                }
+            } else {
+                textReader
+            }
+        case .webPage, .githubRepo:
+            if let url = item.url {
+                ZStack {
+                    textReader
+                        .opacity(previewMode == .reader ? 1 : 0)
+                        .allowsHitTesting(previewMode == .reader)
+                    WebPreview(url: url)
+                        .opacity(previewMode == .web ? 1 : 0)
+                        .allowsHitTesting(previewMode == .web)
+                }
+            } else {
+                textReader
+            }
+        case .file, .note:
+            textReader
+        }
+    }
+
+    @ViewBuilder
+    private var textReader: some View {
+        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ReaderHTMLView(title: item.title, html: html, baseURL: item.url, fontChoice: readerFontChoice)
+        } else {
+            ReaderContentView(text: item.contentText, fontChoice: readerFontChoice)
+        }
+    }
+}
+
+private struct ResizableSidebarDivider: View {
+    @Binding var width: Double
+    @State private var startWidth = 0.0
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.14))
+            .frame(width: 1)
+            .overlay(
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 10)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if startWidth == 0 {
+                                    startWidth = width
+                                }
+                                width = min(520, max(260, startWidth + value.translation.width))
+                            }
+                            .onEnded { _ in
+                                startWidth = 0
+                            }
+                    )
+            )
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+    }
+}
+
+struct ReaderSettingsPanel: View {
+    @Binding var fontChoice: ReaderFontChoice
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(.secondary)
+                Text("Reader Settings")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Font")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $fontChoice) {
+                    ForEach(ReaderFontChoice.allCases) { choice in
+                        Text(choice.rawValue).tag(choice)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+            }
+        }
+        .padding(14)
+        .frame(width: 250, alignment: .leading)
+    }
+}
+
+struct AppBrandIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        if let image = Self.image {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .accessibilityLabel("Bookmarked")
+        } else {
+            Image(systemName: "bookmark")
+                .font(.system(size: size * 0.78, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: size, height: size)
+                .accessibilityLabel("Bookmarked")
+        }
+    }
+
+    private static let image: NSImage? = {
+        guard let url1x = Bundle.module.url(forResource: "brand-icon", withExtension: "png", subdirectory: "Resources"),
+              let rep1x = NSBitmapImageRep(data: (try? Data(contentsOf: url1x)) ?? Data()) else {
+            return nil
+        }
+        let pointSize = NSSize(width: 24, height: 24)
+        rep1x.size = pointSize
+        let image = NSImage(size: pointSize)
+        image.addRepresentation(rep1x)
+        if let url2x = Bundle.module.url(forResource: "brand-icon@2x", withExtension: "png", subdirectory: "Resources"),
+           let rep2x = NSBitmapImageRep(data: (try? Data(contentsOf: url2x)) ?? Data()) {
+            rep2x.size = pointSize
+            image.addRepresentation(rep2x)
+        }
+        return image
+    }()
+}
+
+struct BookmarkIcon: View {
+    let item: BookmarkItem
+    let fallbackColor: Color
+
+    var body: some View {
+        Group {
+            if let data = item.faviconData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                Image(systemName: item.kind.systemImage)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(fallbackColor)
+                    .frame(width: 22, height: 22)
+            }
+        }
+        .frame(width: 24, height: 24)
+    }
+}
+
+struct FlowTags: View {
+    let tags: [String]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(tags.prefix(6), id: \.self) { tag in
+                Text(tag)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(nsColor: .separatorColor).opacity(0.12))
+                    )
+            }
+        }
+    }
+}
+
+struct WebPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.suppressesIncrementalRendering = false
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.allowsBackForwardNavigationGestures = true
+        return view
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if nsView.url != url {
+            nsView.load(URLRequest(url: url))
+        }
+    }
+}

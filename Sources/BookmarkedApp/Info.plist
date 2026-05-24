@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.swair.bookmarked</string>
+    <key>CFBundleName</key>
+    <string>Bookmarked</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Bookmarked reads the current browser tab so it can save and index the page you asked to capture.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Bookmarked uses Accessibility to detect the frontmost app for the global capture shortcut.</string>
+</dict>
+</plist>
