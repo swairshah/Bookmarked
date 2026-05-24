@@ -13,6 +13,7 @@ struct MainWindowView: View {
     @ObservedObject var store: BookmarkStore
     @ObservedObject var controller: MainWindowController
     @State private var query = ""
+    @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
 
     private var results: [BookmarkItem] {
@@ -32,9 +33,11 @@ struct MainWindowView: View {
                     topBar
                     Divider()
                     HStack(spacing: 0) {
-                        sidebar
-                            .frame(width: sidebarWidth)
-                        ResizableSidebarDivider(width: $sidebarWidth)
+                        if isSidebarVisible {
+                            sidebar
+                                .frame(width: sidebarWidth)
+                            ResizableSidebarDivider(width: $sidebarWidth)
+                        }
                         detail
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -42,6 +45,11 @@ struct MainWindowView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .focusedSceneValue(\.toggleSidebarAction) {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isSidebarVisible.toggle()
+            }
+        }
         .onAppear {
             if controller.selection == nil {
                 controller.selection = results.first?.id

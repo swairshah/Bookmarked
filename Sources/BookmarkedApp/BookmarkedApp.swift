@@ -13,6 +13,27 @@ struct BookmarkedApp: App {
             MenuBarLabel(flashToken: store.flashToken)
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            CommandMenu("View") {
+                Button("Toggle Sidebar") {
+                    toggleSidebarAction?()
+                }
+                .keyboardShortcut("b", modifiers: .command)
+            }
+        }
+    }
+
+    @FocusedValue(\.toggleSidebarAction) private var toggleSidebarAction
+}
+
+private struct ToggleSidebarActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var toggleSidebarAction: (() -> Void)? {
+        get { self[ToggleSidebarActionKey.self] }
+        set { self[ToggleSidebarActionKey.self] = newValue }
     }
 }
 
