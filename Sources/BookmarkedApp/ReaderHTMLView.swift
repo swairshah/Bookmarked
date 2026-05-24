@@ -7,10 +7,12 @@ struct ReaderHTMLView: NSViewRepresentable {
     let baseURL: URL?
     let fontChoice: ReaderFontChoice
     var onDoubleClick: (() -> Void)?
+    var onElementRemoved: ((String) -> Void)?
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
+        configuration.userContentController.add(context.coordinator, name: "readerEdit")
         let view = DoubleClickWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")
         view.onDoubleClick = { context.coordinator.onDoubleClick?() }
@@ -19,6 +21,7 @@ struct ReaderHTMLView: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.onDoubleClick = onDoubleClick
+        context.coordinator.onElementRemoved = onElementRemoved
         let document = """
         <!doctype html>
         <html>
@@ -86,7 +89,38 @@ struct ReaderHTMLView: NSViewRepresentable {
         th, td { border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding: 0.45em 0.6em; text-align: left; }
         </style>
         </head>
-        <body><main>\(html)</main></body>
+        <body><main>\(html)</main>
+        <script>
+        (() => {
+          const selector = "figure,picture,img,video,pre,blockquote,table,li,p,h1,h2,h3,h4,h5,h6,section,article";
+          let pendingNode = null;
+
+          function removableElement(target) {
+            const main = document.querySelector("main");
+            if (!main) return null;
+            let node = target.closest(selector);
+            if (!node || !main.contains(node)) return null;
+            const mediaWrapper = node.closest("figure,picture");
+            if (mediaWrapper && main.contains(mediaWrapper)) return mediaWrapper;
+            return node;
+          }
+
+          document.addEventListener("contextmenu", event => {
+            const node = removableElement(event.target);
+            if (!node) return;
+            window.getSelection()?.removeAllRanges();
+            pendingNode = node;
+          }, true);
+
+          window.bookmarkedRemoveContextElement = () => {
+            if (!pendingNode || !pendingNode.isConnected) return;
+            pendingNode.remove();
+            pendingNode = null;
+            window.webkit.messageHandlers.readerEdit.postMessage(document.querySelector("main").innerHTML);
+          };
+        })();
+        </script>
+        </body>
         </html>
         """
 
@@ -100,9 +134,21 @@ struct ReaderHTMLView: NSViewRepresentable {
         Coordinator()
     }
 
-    final class Coordinator {
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "readerEdit")
+    }
+
+    final class Coordinator: NSObject, WKScriptMessageHandler {
         var lastHTML: String?
         var onDoubleClick: (() -> Void)?
+        var onElementRemoved: ((String) -> Void)?
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "readerEdit", let html = message.body as? String else { return }
+            Task { @MainActor in
+                self.onElementRemoved?(html)
+            }
+        }
     }
 
     private static func escape(_ text: String) -> String {
@@ -117,6 +163,11 @@ struct ReaderHTMLView: NSViewRepresentable {
 private final class DoubleClickWebView: WKWebView {
     var onDoubleClick: (() -> Void)?
 
+    override func rightMouseDown(with event: NSEvent) {
+        evaluateJavaScript("window.getSelection && window.getSelection().removeAllRanges();")
+        super.rightMouseDown(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             onDoubleClick?()
@@ -124,5 +175,25 @@ private final class DoubleClickWebView: WKWebView {
         }
 
         super.mouseDown(with: event)
+    }
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+
+        if menu.items.contains(where: { $0.action == #selector(removeContextElement) }) {
+            return
+        }
+
+        if menu.items.isEmpty == false {
+            menu.insertItem(.separator(), at: 0)
+        }
+
+        let item = NSMenuItem(title: "Remove Element", action: #selector(removeContextElement), keyEquivalent: "")
+        item.target = self
+        menu.insertItem(item, at: 0)
+    }
+
+    @objc private func removeContextElement() {
+        evaluateJavaScript("window.bookmarkedRemoveContextElement && window.bookmarkedRemoveContextElement();")
     }
 }
