@@ -3,6 +3,7 @@ import SwiftUI
 struct ReaderContentView: View {
     let text: String
     let fontChoice: ReaderFontChoice
+    var onDoubleClick: (() -> Void)?
 
     private var blocks: [ReaderBlock] {
         ReaderBlock.parse(text)
@@ -28,6 +29,10 @@ struct ReaderContentView: View {
             .textSelection(.enabled)
         }
         .background(Color(nsColor: .textBackgroundColor))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            onDoubleClick?()
+        }
     }
 
     @ViewBuilder

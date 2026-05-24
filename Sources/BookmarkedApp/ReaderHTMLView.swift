@@ -6,16 +6,19 @@ struct ReaderHTMLView: NSViewRepresentable {
     let html: String
     let baseURL: URL?
     let fontChoice: ReaderFontChoice
+    var onDoubleClick: (() -> Void)?
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = DoubleClickWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")
+        view.onDoubleClick = { context.coordinator.onDoubleClick?() }
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.onDoubleClick = onDoubleClick
         let document = """
         <!doctype html>
         <html>
@@ -55,7 +58,15 @@ struct ReaderHTMLView: NSViewRepresentable {
           padding-left: 1em;
           color: color-mix(in srgb, CanvasText 76%, transparent);
         }
-        img, video { max-width: 100%; height: auto; border-radius: 8px; }
+        img, video {
+          max-width: 100%;
+          max-height: min(70vh, 560px);
+          width: auto;
+          height: auto;
+          object-fit: contain;
+          border-radius: 8px;
+        }
+        figure img { display: block; margin: 0 auto; }
         pre {
           overflow: auto;
           padding: 14px 16px;
@@ -91,6 +102,7 @@ struct ReaderHTMLView: NSViewRepresentable {
 
     final class Coordinator {
         var lastHTML: String?
+        var onDoubleClick: (() -> Void)?
     }
 
     private static func escape(_ text: String) -> String {
@@ -99,5 +111,18 @@ struct ReaderHTMLView: NSViewRepresentable {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+}
+
+private final class DoubleClickWebView: WKWebView {
+    var onDoubleClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?()
+            return
+        }
+
+        super.mouseDown(with: event)
     }
 }

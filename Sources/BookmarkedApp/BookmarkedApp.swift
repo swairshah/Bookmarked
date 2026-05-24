@@ -14,6 +14,14 @@ struct BookmarkedApp: App {
         }
         .menuBarExtraStyle(.window)
         .commands {
+            CommandGroup(replacing: .saveItem) {
+                Button("Save Reader Edits") {
+                    saveReaderEditAction?()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(saveReaderEditAction == nil)
+            }
+
             CommandMenu("View") {
                 Button("Toggle Sidebar") {
                     toggleSidebarAction?()
@@ -24,9 +32,14 @@ struct BookmarkedApp: App {
     }
 
     @FocusedValue(\.toggleSidebarAction) private var toggleSidebarAction
+    @FocusedValue(\.saveReaderEditAction) private var saveReaderEditAction
 }
 
 private struct ToggleSidebarActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+private struct SaveReaderEditActionKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
@@ -34,6 +47,11 @@ extension FocusedValues {
     var toggleSidebarAction: (() -> Void)? {
         get { self[ToggleSidebarActionKey.self] }
         set { self[ToggleSidebarActionKey.self] = newValue }
+    }
+
+    var saveReaderEditAction: (() -> Void)? {
+        get { self[SaveReaderEditActionKey.self] }
+        set { self[SaveReaderEditActionKey.self] = newValue }
     }
 }
 

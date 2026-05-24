@@ -130,6 +130,24 @@ final class BookmarkStore: ObservableObject {
         }
     }
 
+    func saveReaderEdits(for itemID: UUID, text: String, isHTML: Bool) {
+        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isHTML {
+            let fallbackURL = URL(string: "https://bookmarked.local")!
+            let extracted = HTMLContentExtractor.extract(from: cleaned, url: items[idx].url ?? fallbackURL)
+            items[idx].contentText = extracted.text
+            items[idx].readerHTML = cleaned
+        } else {
+            items[idx].contentText = cleaned
+            items[idx].readerHTML = nil
+        }
+        items[idx].readerEditedAt = Date()
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        statusMessage = "Saved reader edits"
+    }
+
     func ensureAssets(for item: BookmarkItem) {
         let hasValidFavicon = item.faviconData.map(FaviconFetcher.isRenderableImage) ?? false
         if !hasValidFavicon, let url = item.url {
@@ -144,7 +162,7 @@ final class BookmarkStore: ObservableObject {
             }
         }
 
-        if item.readerHTML == nil, item.url != nil, (item.kind == .webPage || item.kind == .githubRepo) {
+        if item.readerHTML == nil, item.readerEditedAt == nil, item.url != nil, (item.kind == .webPage || item.kind == .githubRepo) {
             refresh(item)
         }
     }
@@ -202,6 +220,7 @@ final class BookmarkStore: ObservableObject {
                 items[idx].summary = draft.summary
                 items[idx].contentText = draft.contentText
                 items[idx].readerHTML = draft.readerHTML
+                items[idx].readerEditedAt = nil
                 items[idx].faviconData = draft.faviconData ?? items[idx].faviconData
                 items[idx].tags = draft.tags
                 items[idx].updatedAt = Date()

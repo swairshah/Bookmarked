@@ -178,11 +178,13 @@ struct FullScreenReaderView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 150)
-                .padding(10)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .padding(.top, 16)
-                .padding(.trailing, 18)
+                .controlSize(.small)
+                .font(.system(size: 10, weight: .regular))
+                .frame(width: 92)
+                .scaleEffect(0.82, anchor: .topTrailing)
+                .opacity(0.52)
+                .padding(.top, 8)
+                .padding(.trailing, 10)
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -216,11 +218,137 @@ struct FullScreenReaderView: View {
 
     @ViewBuilder
     private var textReader: some View {
-        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            ReaderHTMLView(title: item.title, html: html, baseURL: item.url, fontChoice: readerFontChoice)
-        } else {
-            ReaderContentView(text: item.contentText, fontChoice: readerFontChoice)
+        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice)
+    }
+}
+
+struct EditableReaderView: View {
+    let item: BookmarkItem
+    @ObservedObject var store: BookmarkStore
+    let fontChoice: ReaderFontChoice
+
+    @State private var isEditing = false
+    @State private var draftText = ""
+    @State private var isEditingHTML = false
+    @FocusState private var editorFocused: Bool
+
+    var body: some View {
+        Group {
+            if isEditing {
+                editor
+            } else {
+                reader
+            }
         }
+        .focusedSceneValue(\.saveReaderEditAction, saveAction)
+        .onChange(of: item.id) { _ in
+            isEditing = false
+            isEditingHTML = false
+            draftText = editableSource
+        }
+    }
+
+    private var saveAction: (() -> Void)? {
+        isEditing ? { save() } : nil
+    }
+
+    @ViewBuilder
+    private var reader: some View {
+        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ReaderHTMLView(
+                title: item.title,
+                html: html,
+                baseURL: item.url,
+                fontChoice: fontChoice,
+                onDoubleClick: beginEditing
+            )
+        } else {
+            ReaderContentView(text: item.contentText, fontChoice: fontChoice, onDoubleClick: beginEditing)
+        }
+    }
+
+    private var editor: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(isEditingHTML ? "Editing Reader HTML" : "Editing Reader Text")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Command-S saves")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isEditingHTML {
+                    Button("Strip Images") {
+                        draftText = draftText.strippingHTMLImages()
+                    }
+                    .help("Remove image and figure markup from this reader version")
+                }
+                Button("Cancel") {
+                    isEditing = false
+                    isEditingHTML = false
+                    draftText = editableSource
+                }
+                Button("Save") {
+                    save()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            TextEditor(text: $draftText)
+                .font(isEditingHTML ? .system(size: 13, design: .monospaced) : fontChoice.swiftUIFont)
+                .lineSpacing(6)
+                .padding(.horizontal, 44)
+                .padding(.vertical, 30)
+                .focused($editorFocused)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func beginEditing() {
+        isEditingHTML = item.readerHTML?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        draftText = editableSource
+        isEditing = true
+        DispatchQueue.main.async {
+            editorFocused = true
+        }
+    }
+
+    private func save() {
+        store.saveReaderEdits(for: item.id, text: draftText, isHTML: isEditingHTML)
+        isEditing = false
+    }
+
+    private var editableSource: String {
+        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return html
+        }
+        return item.contentText
+    }
+}
+
+private extension String {
+    func strippingHTMLImages() -> String {
+        var value = self
+        value = value.replacingOccurrences(
+            of: "<figure\\b[^>]*>[\\s\\S]*?</figure>",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        value = value.replacingOccurrences(
+            of: "<picture\\b[^>]*>[\\s\\S]*?</picture>",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        value = value.replacingOccurrences(
+            of: "<img\\b[^>]*>",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -425,11 +553,7 @@ struct BookmarkDetailView: View {
 
     @ViewBuilder
     private var textReader: some View {
-        if let html = item.readerHTML, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            ReaderHTMLView(title: item.title, html: html, baseURL: item.url, fontChoice: readerFontChoice)
-        } else {
-            ReaderContentView(text: item.contentText, fontChoice: readerFontChoice)
-        }
+        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice)
     }
 }
 
