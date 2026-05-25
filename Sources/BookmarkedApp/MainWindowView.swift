@@ -8,8 +8,13 @@ extension Notification.Name {
     static let bookmarkedSelectPreviousPreviewTab = Notification.Name("BookmarkedSelectPreviousPreviewTab")
     static let bookmarkedSelectNextPreviewTab = Notification.Name("BookmarkedSelectNextPreviewTab")
     static let bookmarkedToggleCompactDetailHeader = Notification.Name("BookmarkedToggleCompactDetailHeader")
+    static let bookmarkedToggleSearchFocus = Notification.Name("BookmarkedToggleSearchFocus")
     static let bookmarkedScrollPostUp = Notification.Name("BookmarkedScrollPostUp")
     static let bookmarkedScrollPostDown = Notification.Name("BookmarkedScrollPostDown")
+}
+
+private enum MainWindowFocusField: Hashable {
+    case search
 }
 
 private enum BookmarkPreviewMode: String, CaseIterable, Identifiable {
@@ -27,6 +32,7 @@ struct MainWindowView: View {
     @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
+    @FocusState private var focusedField: MainWindowFocusField?
 
     private var results: [BookmarkItem] {
         store.search(query)
@@ -85,18 +91,19 @@ struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextItem)) { _ in
             moveSelection(by: 1)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleSearchFocus)) { _ in
+            toggleSearchFocus()
+        }
     }
 
     private var topBar: some View {
         HStack(spacing: 10) {
             AppBrandIcon(size: 24)
 
-            Text("Bookmarked")
-                .font(.system(size: 18, weight: .semibold))
-
             TextField("Search content, creator, date, source, or URL", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 520)
+                .focused($focusedField, equals: .search)
 
             Spacer()
 
@@ -206,6 +213,17 @@ struct MainWindowView: View {
 
         let nextIndex = min(max(currentIndex + offset, 0), results.count - 1)
         controller.selection = results[nextIndex].id
+    }
+
+    private func toggleSearchFocus() {
+        if focusedField == .search {
+            focusedField = nil
+            DispatchQueue.main.async {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
+        } else {
+            focusedField = .search
+        }
     }
 
 }
@@ -816,6 +834,7 @@ struct ReaderSettingsPanel: View {
 
 struct AppBrandIcon: View {
     let size: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if let image = Self.image {
@@ -823,11 +842,12 @@ struct AppBrandIcon: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
+                .modifier(ConditionalColorInvert(isInverted: colorScheme == .dark))
                 .accessibilityLabel("Bookmarked")
         } else {
             Image(systemName: "bookmark")
                 .font(.system(size: size * 0.78, weight: .semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.orange)
                 .frame(width: size, height: size)
                 .accessibilityLabel("Bookmarked")
         }
@@ -849,6 +869,19 @@ struct AppBrandIcon: View {
         }
         return image
     }()
+}
+
+private struct ConditionalColorInvert: ViewModifier {
+    let isInverted: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isInverted {
+            content.colorInvert()
+        } else {
+            content
+        }
+    }
 }
 
 struct BookmarkIcon: View {

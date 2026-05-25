@@ -67,7 +67,8 @@ private final class BookmarkedWindow: NSWindow {
     private let titlebarHitHeight: CGFloat = 52
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, handleCompactHeaderToggleKey(event) || handlePostScrollKey(event) {
+        if event.type == .keyDown,
+           handleSearchFocusToggleKey(event) || handleCompactHeaderToggleKey(event) || handlePostScrollKey(event) {
             return
         }
 
@@ -79,6 +80,15 @@ private final class BookmarkedWindow: NSWindow {
         }
 
         super.sendEvent(event)
+    }
+
+    private func handleSearchFocusToggleKey(_ event: NSEvent) -> Bool {
+        let meaningfulModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard meaningfulModifiers == .control else { return false }
+        guard event.keyCode == UInt16(kVK_ANSI_F) else { return false }
+
+        NotificationCenter.default.post(name: .bookmarkedToggleSearchFocus, object: nil)
+        return true
     }
 
     private func handleCompactHeaderToggleKey(_ event: NSEvent) -> Bool {
