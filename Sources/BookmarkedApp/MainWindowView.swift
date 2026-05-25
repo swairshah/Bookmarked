@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import WebKit
 import AVKit
 
@@ -232,6 +233,7 @@ struct FullScreenReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
+    @State private var noteFocusToken = 0
     @State private var webFontScale = 1.0
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
@@ -266,6 +268,7 @@ struct FullScreenReaderView: View {
                 .padding(.trailing, 10)
             }
         }
+        .background(noteKeyboardShortcut)
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear {
             store.ensureAssets(for: item)
@@ -313,12 +316,28 @@ struct FullScreenReaderView: View {
 
     @ViewBuilder
     private var noteReader: some View {
-        ReaderContentView(
-            text: item.note ?? "",
+        EditableBookmarkNoteView(
+            item: item,
+            store: store,
             fontChoice: readerFontChoice,
             fontScale: readerFontScale,
-            emptyMessage: "No notes yet."
+            focusToken: noteFocusToken
         )
+    }
+
+    private var noteKeyboardShortcut: some View {
+        Group {
+            if previewMode == .notes {
+                Button("") {
+                    focusNoteEditor()
+                }
+                .keyboardShortcut(.return, modifiers: [])
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .allowsHitTesting(false)
     }
 
     private func movePreviewTab(by offset: Int) {
@@ -337,6 +356,11 @@ struct FullScreenReaderView: View {
         } else {
             readerFontScale = clampedFontScale(readerFontScale + delta * 0.08)
         }
+    }
+
+    private func focusNoteEditor() {
+        previewMode = .notes
+        noteFocusToken += 1
     }
 }
 
@@ -453,6 +477,217 @@ struct EditableReaderView: View {
     }
 }
 
+struct EditableBookmarkNoteView: View {
+    let item: BookmarkItem
+    @ObservedObject var store: BookmarkStore
+    let fontChoice: ReaderFontChoice
+    let fontScale: Double
+    let focusToken: Int
+
+    @State private var isEditing = false
+    @State private var draftText = ""
+    @State private var focusEditor = false
+    @State private var editingItemID: UUID?
+
+    var body: some View {
+        Group {
+            if isEditing {
+                editor
+            } else {
+                reader
+            }
+        }
+        .onAppear {
+            draftText = item.note ?? ""
+            if focusToken > 0 {
+                beginEditing()
+            }
+        }
+        .onDisappear {
+            if isEditing {
+                save()
+            }
+        }
+        .onChange(of: item.id) { _ in
+            if isEditing {
+                save()
+            }
+            draftText = item.note ?? ""
+            isEditing = false
+        }
+        .onChange(of: focusToken) { _ in
+            beginEditing()
+        }
+    }
+
+    private var reader: some View {
+        ReaderContentView(
+            text: item.note ?? "",
+            fontChoice: fontChoice,
+            fontScale: fontScale,
+            emptyMessage: "No notes yet."
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            beginEditing()
+        }
+    }
+
+    private var editor: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Notes")
+                    .font(.system(size: 13, weight: .semibold))
+
+                Spacer()
+
+                Button {
+                    cancel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.bordered)
+                .help("Discard note edits")
+
+                Button {
+                    save()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Save note")
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            EscapeCommitTextEditor(
+                text: $draftText,
+                onEscape: save,
+                focusRequest: $focusEditor
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func beginEditing() {
+        draftText = item.note ?? ""
+        isEditing = true
+        editingItemID = item.id
+        focusEditor = true
+    }
+
+    private func save() {
+        store.setNote(id: editingItemID ?? item.id, text: draftText)
+        isEditing = false
+        focusEditor = false
+        editingItemID = nil
+    }
+
+    private func cancel() {
+        draftText = item.note ?? ""
+        isEditing = false
+        focusEditor = false
+        editingItemID = nil
+    }
+}
+
+private struct EscapeCommitTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var onEscape: () -> Void
+    @Binding var focusRequest: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+
+        let contentSize = scroll.contentSize
+        let container = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: .greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.heightTracksTextView = false
+
+        let layout = NSLayoutManager()
+        let storage = NSTextStorage()
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+
+        let textView = EscapeCommitNSTextView(frame: .zero, textContainer: container)
+        textView.delegate = context.coordinator
+        textView.onEscape = onEscape
+        textView.isEditable = true
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.textContainerInset = NSSize(width: 44, height: 30)
+        textView.drawsBackground = false
+        textView.allowsUndo = true
+        textView.autoresizingMask = [.width]
+        textView.string = text
+
+        scroll.documentView = textView
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        if focusRequest {
+            DispatchQueue.main.async {
+                guard let window = textView.window else { return }
+                window.makeFirstResponder(textView)
+                let end = (textView.string as NSString).length
+                textView.setSelectedRange(NSRange(location: end, length: 0))
+                textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+                focusRequest = false
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: EscapeCommitTextEditor
+
+        init(_ parent: EscapeCommitTextEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+private final class EscapeCommitNSTextView: NSTextView {
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.makeFirstResponder(nil)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
 private extension String {
     func strippingHTMLImages() -> String {
         var value = self
@@ -523,6 +758,7 @@ struct BookmarkDetailView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
+    @State private var noteFocusToken = 0
     @State private var showingSettings = false
     @State private var webFontScale = 1.0
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
@@ -549,6 +785,7 @@ struct BookmarkDetailView: View {
             Divider()
             preview
         }
+        .background(noteKeyboardShortcut)
         .onChange(of: item.id) { _ in
             previewMode = .reader
         }
@@ -762,12 +999,28 @@ struct BookmarkDetailView: View {
 
     @ViewBuilder
     private var noteReader: some View {
-        ReaderContentView(
-            text: item.note ?? "",
+        EditableBookmarkNoteView(
+            item: item,
+            store: store,
             fontChoice: readerFontChoice,
             fontScale: readerFontScale,
-            emptyMessage: "No notes yet."
+            focusToken: noteFocusToken
         )
+    }
+
+    private var noteKeyboardShortcut: some View {
+        Group {
+            if previewMode == .notes {
+                Button("") {
+                    focusNoteEditor()
+                }
+                .keyboardShortcut(.return, modifiers: [])
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .allowsHitTesting(false)
     }
 
     private func movePreviewTab(by offset: Int) {
@@ -786,6 +1039,11 @@ struct BookmarkDetailView: View {
         } else {
             readerFontScale = clampedFontScale(readerFontScale + delta * 0.08)
         }
+    }
+
+    private func focusNoteEditor() {
+        previewMode = .notes
+        noteFocusToken += 1
     }
 }
 

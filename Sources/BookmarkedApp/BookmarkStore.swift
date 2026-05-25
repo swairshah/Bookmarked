@@ -150,6 +150,18 @@ final class BookmarkStore: ObservableObject {
     }
 
     @discardableResult
+    func setNote(id: UUID, text: String) -> BookmarkItem? {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
+        let newNote: String? = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+        guard newNote != items[idx].note else { return items[idx] }
+        items[idx].note = newNote
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        statusMessage = "Saved notes"
+        return items[idx]
+    }
+
+    @discardableResult
     func setTags(id: UUID, tags: [String]) -> BookmarkItem? {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
         items[idx].tags = Self.normalizedTags(tags)
