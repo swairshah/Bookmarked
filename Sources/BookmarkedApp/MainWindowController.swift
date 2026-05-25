@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 @MainActor
@@ -66,7 +67,7 @@ private final class BookmarkedWindow: NSWindow {
     private let titlebarHitHeight: CGFloat = 52
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, handlePostScrollKey(event) {
+        if event.type == .keyDown, handleCompactHeaderToggleKey(event) || handlePostScrollKey(event) {
             return
         }
 
@@ -78,6 +79,16 @@ private final class BookmarkedWindow: NSWindow {
         }
 
         super.sendEvent(event)
+    }
+
+    private func handleCompactHeaderToggleKey(_ event: NSEvent) -> Bool {
+        let meaningfulModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard meaningfulModifiers == .control else { return false }
+        guard event.keyCode == UInt16(kVK_ANSI_M) else { return false }
+        guard !isEditingText(in: firstResponder) else { return false }
+
+        NotificationCenter.default.post(name: .bookmarkedToggleCompactDetailHeader, object: nil)
+        return true
     }
 
     private func handlePostScrollKey(_ event: NSEvent) -> Bool {

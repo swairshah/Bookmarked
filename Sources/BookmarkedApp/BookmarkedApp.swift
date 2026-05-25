@@ -29,6 +29,10 @@ struct BookmarkedApp: App {
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
+                Button("Toggle Compact Header") {
+                    NotificationCenter.default.post(name: .bookmarkedToggleCompactDetailHeader, object: nil)
+                }
+
                 Divider()
 
                 Button("Previous Bookmark") {

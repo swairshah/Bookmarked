@@ -7,6 +7,7 @@ extension Notification.Name {
     static let bookmarkedSelectNextItem = Notification.Name("BookmarkedSelectNextItem")
     static let bookmarkedSelectPreviousPreviewTab = Notification.Name("BookmarkedSelectPreviousPreviewTab")
     static let bookmarkedSelectNextPreviewTab = Notification.Name("BookmarkedSelectNextPreviewTab")
+    static let bookmarkedToggleCompactDetailHeader = Notification.Name("BookmarkedToggleCompactDetailHeader")
     static let bookmarkedScrollPostUp = Notification.Name("BookmarkedScrollPostUp")
     static let bookmarkedScrollPostDown = Notification.Name("BookmarkedScrollPostDown")
 }
@@ -493,6 +494,7 @@ struct BookmarkDetailView: View {
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var showingSettings = false
+    @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
 
@@ -525,9 +527,66 @@ struct BookmarkDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextPreviewTab)) { _ in
             movePreviewTab(by: 1)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleCompactDetailHeader)) { _ in
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isHeaderCompact.toggle()
+            }
+        }
     }
 
+    @ViewBuilder
     private var header: some View {
+        if isHeaderCompact {
+            compactHeader
+        } else {
+            expandedHeader
+        }
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 10) {
+            if let data = item.faviconData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            Text(item.title)
+                .font(.system(size: 14, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    store.open(item)
+                }
+                .help(item.url != nil || item.fileURL != nil ? "Double-click to open" : "")
+
+            Spacer(minLength: 12)
+
+            if previewModes.count > 1 {
+                Picker("", selection: $previewMode) {
+                    ForEach(previewModes) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: CGFloat(previewModes.count) * 62)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(minHeight: 34)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear {
+            store.ensureAssets(for: item)
+        }
+    }
+
+    private var expandedHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 if let data = item.faviconData, let image = NSImage(data: data) {
