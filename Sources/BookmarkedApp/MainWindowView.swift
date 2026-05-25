@@ -11,6 +11,7 @@ extension Notification.Name {
     static let bookmarkedToggleSearchFocus = Notification.Name("BookmarkedToggleSearchFocus")
     static let bookmarkedScrollPostUp = Notification.Name("BookmarkedScrollPostUp")
     static let bookmarkedScrollPostDown = Notification.Name("BookmarkedScrollPostDown")
+    static let bookmarkedAdjustPreviewFontSize = Notification.Name("BookmarkedAdjustPreviewFontSize")
 }
 
 private enum MainWindowFocusField: Hashable {
@@ -31,7 +32,6 @@ struct MainWindowView: View {
     @State private var query = ""
     @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
-    @AppStorage("readerFontScale") private var readerFontScale = 1.0
     @FocusState private var focusedField: MainWindowFocusField?
 
     private var results: [BookmarkItem] {
@@ -69,10 +69,10 @@ struct MainWindowView: View {
             }
         }
         .focusedSceneValue(\.increaseReaderFontAction) {
-            readerFontScale = min(1.6, readerFontScale + 0.08)
+            NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": 1.0])
         }
         .focusedSceneValue(\.decreaseReaderFontAction) {
-            readerFontScale = max(0.72, readerFontScale - 0.08)
+            NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": -1.0])
         }
         .onAppear {
             if controller.selection == nil {
@@ -232,6 +232,7 @@ struct FullScreenReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
+    @State private var webFontScale = 1.0
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
 
@@ -278,6 +279,9 @@ struct FullScreenReaderView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextPreviewTab)) { _ in
             movePreviewTab(by: 1)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedAdjustPreviewFontSize)) { notification in
+            adjustFontScale(delta: fontScaleDelta(from: notification))
+        }
     }
 
     private var canShowWeb: Bool {
@@ -293,7 +297,7 @@ struct FullScreenReaderView: View {
                 textReader
                     .opacity(previewMode == .reader ? 1 : 0)
                     .allowsHitTesting(previewMode == .reader)
-                WebPreview(url: url)
+                WebPreview(url: url, fontScale: webFontScale)
                     .opacity(previewMode == .web ? 1 : 0)
                     .allowsHitTesting(previewMode == .web)
             }
@@ -325,6 +329,14 @@ struct FullScreenReaderView: View {
             return
         }
         previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
+    }
+
+    private func adjustFontScale(delta: Double) {
+        if previewMode == .web {
+            webFontScale = clampedFontScale(webFontScale + delta * 0.08)
+        } else {
+            readerFontScale = clampedFontScale(readerFontScale + delta * 0.08)
+        }
     }
 }
 
@@ -512,6 +524,7 @@ struct BookmarkDetailView: View {
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var showingSettings = false
+    @State private var webFontScale = 1.0
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
@@ -549,6 +562,9 @@ struct BookmarkDetailView: View {
             withAnimation(.easeInOut(duration: 0.16)) {
                 isHeaderCompact.toggle()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedAdjustPreviewFontSize)) { notification in
+            adjustFontScale(delta: fontScaleDelta(from: notification))
         }
     }
 
@@ -726,7 +742,7 @@ struct BookmarkDetailView: View {
             case .webPage, .githubRepo:
                 if let url = item.url {
                     if previewMode == .web {
-                        WebPreview(url: url)
+                        WebPreview(url: url, fontScale: webFontScale)
                     } else {
                         textReader
                     }
@@ -762,6 +778,14 @@ struct BookmarkDetailView: View {
             return
         }
         previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
+    }
+
+    private func adjustFontScale(delta: Double) {
+        if previewMode == .web {
+            webFontScale = clampedFontScale(webFontScale + delta * 0.08)
+        } else {
+            readerFontScale = clampedFontScale(readerFontScale + delta * 0.08)
+        }
     }
 }
 
@@ -929,6 +953,7 @@ struct FlowTags: View {
 
 struct WebPreview: NSViewRepresentable {
     let url: URL
+    let fontScale: Double
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -947,6 +972,10 @@ struct WebPreview: NSViewRepresentable {
         context.coordinator.webView = nsView
         if nsView.url != url {
             nsView.load(URLRequest(url: url))
+        }
+        let pageZoom = CGFloat(fontScale)
+        if abs(nsView.pageZoom - pageZoom) > 0.001 {
+            nsView.pageZoom = pageZoom
         }
     }
 
@@ -982,4 +1011,12 @@ struct WebPreview: NSViewRepresentable {
             webView?.evaluateJavaScript("window.scrollBy({ top: \(step * direction), left: 0, behavior: 'smooth' });")
         }
     }
+}
+
+private func fontScaleDelta(from notification: Notification) -> Double {
+    notification.userInfo?["delta"] as? Double ?? 0
+}
+
+private func clampedFontScale(_ value: Double) -> Double {
+    min(1.6, max(0.72, value))
 }

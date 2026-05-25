@@ -59,12 +59,12 @@ struct BookmarkedApp: App {
 
                 Divider()
 
-                Button("Increase Reader Font Size") {
+                Button("Increase Font Size") {
                     increaseReaderFontAction?()
                 }
                 .keyboardShortcut("+", modifiers: .command)
 
-                Button("Decrease Reader Font Size") {
+                Button("Decrease Font Size") {
                     decreaseReaderFontAction?()
                 }
                 .keyboardShortcut("-", modifiers: .command)
