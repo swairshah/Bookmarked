@@ -157,6 +157,7 @@ struct MenuBarLabel: View {
         Group {
             if let image = flashPhase ? Self.flashIcon : Self.icon {
                 Image(nsImage: image)
+                    .renderingMode(.template)
                     .accessibilityLabel("Bookmarked")
             } else {
                 Image(systemName: "bookmark")
@@ -187,7 +188,7 @@ struct MenuBarLabel: View {
         ) else {
             return nil
         }
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }()
 
@@ -199,7 +200,7 @@ struct MenuBarLabel: View {
         ) else {
             return nil
         }
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }()
 
