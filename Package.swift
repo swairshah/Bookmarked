@@ -8,7 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "Bookmarked", targets: ["Bookmarked"]),
-        .executable(name: "bookmarkedctl", targets: ["BookmarkedCLI"]),
+        .executable(name: "bookmarked", targets: ["BookmarkedCLI"]),
         .library(name: "BookmarkedClient", targets: ["BookmarkedClient"])
     ],
     targets: [

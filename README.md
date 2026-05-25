@@ -23,10 +23,10 @@ swift run Bookmarked
 Bookmarked exposes a local CLI for agents and scripts while the app is running:
 
 ```bash
-swift run bookmarkedctl search "oauth" --json
-swift run bookmarkedctl read 7602A4C8 --format text
-swift run bookmarkedctl note 7602A4C8 "Follow up on this."
-swift run bookmarkedctl tag 7602A4C8 add research
+swift run bookmarked search "oauth" --json
+swift run bookmarked read 7602A4C8 --format text
+swift run bookmarked note 7602A4C8 "Follow up on this."
+swift run bookmarked tag 7602A4C8 add research
 ```
 
 The CLI talks to the running app over a loopback-only local broker, so bookmark
