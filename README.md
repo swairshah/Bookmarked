@@ -18,6 +18,20 @@ Bookmarked is a native macOS menu bar bookmark curator inspired by Trackie, with
 swift run Bookmarked
 ```
 
+## CLI
+
+Bookmarked exposes a local CLI for agents and scripts while the app is running:
+
+```bash
+swift run bookmarkedctl search "oauth" --json
+swift run bookmarkedctl read 7602A4C8 --format text
+swift run bookmarkedctl note 7602A4C8 "Follow up on this."
+swift run bookmarkedctl tag 7602A4C8 add research
+```
+
+The CLI talks to the running app over a loopback-only local broker, so bookmark
+changes update the same in-memory library the UI is showing.
+
 ## Build App Bundle
 
 ```bash

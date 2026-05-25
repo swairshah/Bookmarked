@@ -35,6 +35,7 @@ struct BookmarkItem: Codable, Identifiable, Hashable {
     var creator: String?
     var sourceApp: String?
     var summary: String?
+    var note: String?
     var contentText: String
     var readerHTML: String?
     var readerEditedAt: Date?
@@ -53,6 +54,7 @@ struct BookmarkItem: Codable, Identifiable, Hashable {
         creator: String? = nil,
         sourceApp: String? = nil,
         summary: String? = nil,
+        note: String? = nil,
         contentText: String = "",
         readerHTML: String? = nil,
         readerEditedAt: Date? = nil,
@@ -70,6 +72,7 @@ struct BookmarkItem: Codable, Identifiable, Hashable {
         self.creator = creator
         self.sourceApp = sourceApp
         self.summary = summary
+        self.note = note
         self.contentText = contentText
         self.readerHTML = readerHTML
         self.readerEditedAt = readerEditedAt
@@ -89,6 +92,7 @@ struct BookmarkDraft {
     var creator: String?
     var sourceApp: String?
     var summary: String?
+    var note: String?
     var contentText: String
     var readerHTML: String?
     var faviconData: Data?

@@ -54,6 +54,7 @@ final class BookmarkStore: ObservableObject {
                 item.creator ?? "",
                 item.sourceApp ?? "",
                 item.summary ?? "",
+                item.note ?? "",
                 item.url?.absoluteString ?? "",
                 item.fileURL?.path ?? "",
                 item.tags.joined(separator: " "),
@@ -74,6 +75,7 @@ final class BookmarkStore: ObservableObject {
             creator: draft.creator,
             sourceApp: draft.sourceApp,
             summary: draft.summary,
+            note: draft.note,
             contentText: draft.contentText,
             readerHTML: draft.readerHTML,
             faviconData: draft.faviconData,
@@ -121,6 +123,58 @@ final class BookmarkStore: ObservableObject {
     func delete(_ item: BookmarkItem) {
         items.removeAll { $0.id == item.id }
         scheduleSave()
+    }
+
+    func resolveItem(idOrPrefix: String) -> BookmarkItem? {
+        let normalized = idOrPrefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        if let uuid = UUID(uuidString: normalized) {
+            return item(id: uuid)
+        }
+        return items.first { $0.id.uuidString.lowercased().hasPrefix(normalized) }
+    }
+
+    @discardableResult
+    func appendNote(id: UUID, text: String) -> BookmarkItem? {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return items[idx] }
+        if let existing = items[idx].note, !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items[idx].note = existing + "\n\n" + trimmed
+        } else {
+            items[idx].note = trimmed
+        }
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        return items[idx]
+    }
+
+    @discardableResult
+    func setTags(id: UUID, tags: [String]) -> BookmarkItem? {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
+        items[idx].tags = Self.normalizedTags(tags)
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        return items[idx]
+    }
+
+    @discardableResult
+    func addTag(id: UUID, tag: String) -> BookmarkItem? {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
+        items[idx].tags = Self.normalizedTags(items[idx].tags + [tag])
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        return items[idx]
+    }
+
+    @discardableResult
+    func removeTag(id: UUID, tag: String) -> BookmarkItem? {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return nil }
+        let normalized = Self.normalizedTag(tag)
+        items[idx].tags = items[idx].tags.filter { Self.normalizedTag($0) != normalized }
+        items[idx].updatedAt = Date()
+        scheduleSave()
+        return items[idx]
     }
 
     func refresh(_ item: BookmarkItem) {
@@ -208,6 +262,7 @@ final class BookmarkStore: ObservableObject {
                 creator: fetched.creator,
                 sourceApp: sourceApp,
                 summary: fetched.summary,
+                note: nil,
                 contentText: fetched.text,
                 readerHTML: fetched.html,
                 faviconData: favicon,
@@ -239,12 +294,21 @@ final class BookmarkStore: ObservableObject {
                 creator: nil,
                 sourceApp: sourceApp,
                 summary: "Saved URL. Content indexing failed: \(error.localizedDescription)",
+                note: nil,
                 contentText: url.absoluteString,
                 readerHTML: nil,
                 faviconData: await FaviconFetcher.fetch(for: url),
                 tags: inferredTags(for: url, kind: kind)
             ))
         }
+    }
+
+    private static func normalizedTags(_ tags: [String]) -> [String] {
+        Array(Set(tags.map(normalizedTag).filter { !$0.isEmpty })).sorted()
+    }
+
+    private static func normalizedTag(_ tag: String) -> String {
+        tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func inferredTags(for url: URL, kind: BookmarkKind) -> [String] {
