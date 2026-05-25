@@ -3,36 +3,58 @@ import SwiftUI
 struct ReaderContentView: View {
     let text: String
     let fontChoice: ReaderFontChoice
+    let fontScale: Double
+    var emptyMessage = "No indexed text yet."
     var onEditSource: (() -> Void)?
+    @State private var scrollIndex = 0
 
     private var blocks: [ReaderBlock] {
         ReaderBlock.parse(text)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 15) {
-                if blocks.isEmpty {
-                    Text("No indexed text yet.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(blocks) { block in
-                        blockView(block)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 15) {
+                    if blocks.isEmpty {
+                        Text(emptyMessage)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(blocks) { block in
+                            blockView(block)
+                                .id(block.id)
+                        }
                     }
                 }
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(.horizontal, 48)
+                .padding(.vertical, 38)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .textSelection(.enabled)
             }
-            .frame(maxWidth: 820, alignment: .leading)
-            .padding(.horizontal, 48)
-            .padding(.vertical, 38)
-            .frame(maxWidth: .infinity, alignment: .top)
-            .textSelection(.enabled)
+            .onReceive(NotificationCenter.default.publisher(for: .bookmarkedScrollPostDown)) { _ in
+                scrollReader(by: 5, proxy: proxy)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .bookmarkedScrollPostUp)) { _ in
+                scrollReader(by: -5, proxy: proxy)
+            }
         }
         .background(Color(nsColor: .textBackgroundColor))
         .contextMenu {
-            Button("Edit Reader Source") {
-                onEditSource?()
+            if let onEditSource {
+                Button("Edit Reader Source") {
+                    onEditSource()
+                }
             }
+        }
+    }
+
+    private func scrollReader(by delta: Int, proxy: ScrollViewProxy) {
+        guard !blocks.isEmpty else { return }
+        scrollIndex = min(max(scrollIndex + delta, 0), blocks.count - 1)
+        withAnimation(.easeInOut(duration: 0.16)) {
+            proxy.scrollTo(scrollIndex, anchor: .top)
         }
     }
 
@@ -47,14 +69,14 @@ struct ReaderContentView: View {
                 .padding(.bottom, 2)
         case .paragraph:
             Text(block.inlineAttributed)
-                .font(fontChoice.swiftUIFont)
+                .font(fontChoice.swiftUIFont(scale: fontScale))
                 .lineSpacing(7)
         case .bullet:
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("•")
                     .font(.system(size: 17, weight: .semibold))
                 Text(block.inlineAttributed)
-                    .font(fontChoice.swiftUIFont)
+                    .font(fontChoice.swiftUIFont(scale: fontScale))
                     .lineSpacing(6)
             }
             .padding(.leading, 8)
@@ -78,7 +100,7 @@ struct ReaderBlock: Identifiable {
         case bullet
     }
 
-    let id = UUID()
+    let id: Int
     let kind: Kind
     let text: String
 
@@ -104,7 +126,7 @@ struct ReaderBlock: Identifiable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             paragraphLines.removeAll()
             guard !paragraph.isEmpty else { return }
-            blocks.append(ReaderBlock(kind: .paragraph, text: paragraph))
+            blocks.append(ReaderBlock(id: blocks.count, kind: .paragraph, text: paragraph))
         }
 
         for rawLine in normalized.components(separatedBy: "\n") {
@@ -116,13 +138,13 @@ struct ReaderBlock: Identifiable {
 
             if let heading = parseHeading(line) {
                 flushParagraph()
-                blocks.append(ReaderBlock(kind: .heading(heading.level), text: heading.text))
+                blocks.append(ReaderBlock(id: blocks.count, kind: .heading(heading.level), text: heading.text))
                 continue
             }
 
             if line.hasPrefix("- ") || line.hasPrefix("* ") {
                 flushParagraph()
-                blocks.append(ReaderBlock(kind: .bullet, text: String(line.dropFirst(2))))
+                blocks.append(ReaderBlock(id: blocks.count, kind: .bullet, text: String(line.dropFirst(2))))
                 continue
             }
 

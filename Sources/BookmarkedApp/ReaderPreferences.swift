@@ -7,14 +7,14 @@ enum ReaderFontChoice: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var swiftUIFont: Font {
+    func swiftUIFont(scale: Double = 1) -> Font {
         switch self {
         case .serif:
-            return .custom("New York", size: 18)
+            return .custom("New York", size: 18 * scale)
         case .sans:
-            return .system(size: 17)
+            return .system(size: 17 * scale)
         case .mono:
-            return .system(size: 16, design: .monospaced)
+            return .system(size: 16 * scale, design: .monospaced)
         }
     }
 
@@ -29,12 +29,14 @@ enum ReaderFontChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    var cssFontSize: String {
+    func cssFontSize(scale: Double = 1) -> String {
+        let baseSize: Double
         switch self {
-        case .serif: return "19px"
-        case .sans: return "18px"
-        case .mono: return "16px"
+        case .serif: baseSize = 19
+        case .sans: baseSize = 18
+        case .mono: baseSize = 16
         }
+        return "\(Int((baseSize * scale).rounded()))px"
     }
 
     var cssLineHeight: String {

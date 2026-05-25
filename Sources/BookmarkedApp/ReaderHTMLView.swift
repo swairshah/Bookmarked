@@ -6,6 +6,7 @@ struct ReaderHTMLView: NSViewRepresentable {
     let html: String
     let baseURL: URL?
     let fontChoice: ReaderFontChoice
+    let fontScale: Double
     var onEditSource: (() -> Void)?
     var onElementRemoved: ((String) -> Void)?
 
@@ -16,10 +17,12 @@ struct ReaderHTMLView: NSViewRepresentable {
         let view = ReaderWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")
         view.onEditSource = { context.coordinator.onEditSource?() }
+        context.coordinator.webView = view
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.webView = nsView
         context.coordinator.onEditSource = onEditSource
         context.coordinator.onElementRemoved = onElementRemoved
         let document = """
@@ -35,7 +38,7 @@ struct ReaderHTMLView: NSViewRepresentable {
           background: transparent;
           color: CanvasText;
           font-family: \(fontChoice.cssFontFamily);
-          font-size: \(fontChoice.cssFontSize);
+          font-size: \(fontChoice.cssFontSize(scale: fontScale));
           line-height: \(fontChoice.cssLineHeight);
         }
         main {
@@ -142,12 +145,42 @@ struct ReaderHTMLView: NSViewRepresentable {
         var lastHTML: String?
         var onEditSource: (() -> Void)?
         var onElementRemoved: ((String) -> Void)?
+        weak var webView: WKWebView?
+        private var observers: [NSObjectProtocol] = []
+
+        override init() {
+            super.init()
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedScrollPostDown,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.scroll(by: 1)
+            })
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedScrollPostUp,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.scroll(by: -1)
+            })
+        }
+
+        deinit {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "readerEdit", let html = message.body as? String else { return }
             Task { @MainActor in
                 self.onElementRemoved?(html)
             }
+        }
+
+        private func scroll(by direction: Int) {
+            webView?.evaluateJavaScript("window.scrollBy({ top: \(420 * direction), left: 0, behavior: 'smooth' });")
         }
     }
 

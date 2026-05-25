@@ -2,8 +2,18 @@ import SwiftUI
 import WebKit
 import AVKit
 
+extension Notification.Name {
+    static let bookmarkedSelectPreviousItem = Notification.Name("BookmarkedSelectPreviousItem")
+    static let bookmarkedSelectNextItem = Notification.Name("BookmarkedSelectNextItem")
+    static let bookmarkedSelectPreviousPreviewTab = Notification.Name("BookmarkedSelectPreviousPreviewTab")
+    static let bookmarkedSelectNextPreviewTab = Notification.Name("BookmarkedSelectNextPreviewTab")
+    static let bookmarkedScrollPostUp = Notification.Name("BookmarkedScrollPostUp")
+    static let bookmarkedScrollPostDown = Notification.Name("BookmarkedScrollPostDown")
+}
+
 private enum BookmarkPreviewMode: String, CaseIterable, Identifiable {
     case reader = "Reader"
+    case notes = "Notes"
     case web = "Web"
 
     var id: String { rawValue }
@@ -15,6 +25,7 @@ struct MainWindowView: View {
     @State private var query = ""
     @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
+    @AppStorage("readerFontScale") private var readerFontScale = 1.0
 
     private var results: [BookmarkItem] {
         store.search(query)
@@ -50,6 +61,12 @@ struct MainWindowView: View {
                 isSidebarVisible.toggle()
             }
         }
+        .focusedSceneValue(\.increaseReaderFontAction) {
+            readerFontScale = min(1.6, readerFontScale + 0.08)
+        }
+        .focusedSceneValue(\.decreaseReaderFontAction) {
+            readerFontScale = max(0.72, readerFontScale - 0.08)
+        }
         .onAppear {
             if controller.selection == nil {
                 controller.selection = results.first?.id
@@ -60,6 +77,12 @@ struct MainWindowView: View {
                 return
             }
             controller.selection = newValue.first?.id
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousItem)) { _ in
+            moveSelection(by: -1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextItem)) { _ in
+            moveSelection(by: 1)
         }
     }
 
@@ -109,34 +132,43 @@ struct MainWindowView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
 
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(results) { item in
-                        BookmarkRow(item: item)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(controller.selection == item.id ? Color.accentColor : Color.clear)
-                            )
-                            .foregroundStyle(controller.selection == item.id ? Color.white : Color.primary)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                controller.selection = item.id
-                            }
-                            .contextMenu {
-                                Button("Open") { store.open(item) }
-                                Button("Refresh Index") { store.refresh(item) }
-                                Divider()
-                                Button("Delete", role: .destructive) { store.delete(item) }
-                            }
-                            .onAppear {
-                                store.ensureAssets(for: item)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(results) { item in
+                            BookmarkRow(item: item)
+                                .id(item.id)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(controller.selection == item.id ? Color.accentColor : Color.clear)
+                                )
+                                .foregroundStyle(controller.selection == item.id ? Color.white : Color.primary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    controller.selection = item.id
+                                }
+                                .contextMenu {
+                                    Button("Open") { store.open(item) }
+                                    Button("Refresh Index") { store.refresh(item) }
+                                    Divider()
+                                    Button("Delete", role: .destructive) { store.delete(item) }
+                                }
+                                .onAppear {
+                                    store.ensureAssets(for: item)
+                                }
                             }
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .onChange(of: controller.selection) { id in
+                    guard let id else { return }
+                    withAnimation(.easeInOut(duration: 0.14)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
             }
             .background(Color.clear)
         }
@@ -159,6 +191,22 @@ struct MainWindowView: View {
         }
     }
 
+    private func moveSelection(by offset: Int) {
+        guard !results.isEmpty else {
+            controller.selection = nil
+            return
+        }
+
+        guard let selection = controller.selection,
+              let currentIndex = results.firstIndex(where: { $0.id == selection }) else {
+            controller.selection = offset < 0 ? results.last?.id : results.first?.id
+            return
+        }
+
+        let nextIndex = min(max(currentIndex + offset, 0), results.count - 1)
+        controller.selection = results[nextIndex].id
+    }
+
 }
 
 struct FullScreenReaderView: View {
@@ -166,9 +214,14 @@ struct FullScreenReaderView: View {
     @ObservedObject var store: BookmarkStore
     @State private var previewMode: BookmarkPreviewMode = .reader
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
+    @AppStorage("readerFontScale") private var readerFontScale = 1.0
 
     private var readerFontChoice: ReaderFontChoice {
         ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif
+    }
+
+    private var previewModes: [BookmarkPreviewMode] {
+        canShowWeb ? [.reader, .notes, .web] : [.reader, .notes]
     }
 
     var body: some View {
@@ -176,9 +229,9 @@ struct FullScreenReaderView: View {
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if canShowWeb {
+            if previewModes.count > 1 {
                 Picker("", selection: $previewMode) {
-                    ForEach(BookmarkPreviewMode.allCases) { mode in
+                    ForEach(previewModes) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
@@ -186,7 +239,7 @@ struct FullScreenReaderView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .font(.system(size: 10, weight: .regular))
-                .frame(width: 92)
+                .frame(width: CGFloat(previewModes.count) * 54)
                 .scaleEffect(0.82, anchor: .topTrailing)
                 .opacity(0.52)
                 .padding(.top, 8)
@@ -200,6 +253,12 @@ struct FullScreenReaderView: View {
         .onChange(of: item.id) { _ in
             previewMode = .reader
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousPreviewTab)) { _ in
+            movePreviewTab(by: -1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextPreviewTab)) { _ in
+            movePreviewTab(by: 1)
+        }
     }
 
     private var canShowWeb: Bool {
@@ -208,7 +267,9 @@ struct FullScreenReaderView: View {
 
     @ViewBuilder
     private var preview: some View {
-        if canShowWeb, let url = item.url {
+        if previewMode == .notes {
+            noteReader
+        } else if canShowWeb, let url = item.url {
             ZStack {
                 textReader
                     .opacity(previewMode == .reader ? 1 : 0)
@@ -224,7 +285,27 @@ struct FullScreenReaderView: View {
 
     @ViewBuilder
     private var textReader: some View {
-        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice)
+        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice, fontScale: readerFontScale)
+    }
+
+    @ViewBuilder
+    private var noteReader: some View {
+        ReaderContentView(
+            text: item.note ?? "",
+            fontChoice: readerFontChoice,
+            fontScale: readerFontScale,
+            emptyMessage: "No notes yet."
+        )
+    }
+
+    private func movePreviewTab(by offset: Int) {
+        let modes = previewModes
+        guard !modes.isEmpty else { return }
+        guard let currentIndex = modes.firstIndex(of: previewMode) else {
+            previewMode = modes[0]
+            return
+        }
+        previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
     }
 }
 
@@ -232,6 +313,7 @@ struct EditableReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     let fontChoice: ReaderFontChoice
+    let fontScale: Double
 
     @State private var isEditing = false
     @State private var draftText = ""
@@ -266,13 +348,14 @@ struct EditableReaderView: View {
                 html: html,
                 baseURL: item.url,
                 fontChoice: fontChoice,
+                fontScale: fontScale,
                 onEditSource: beginEditing,
                 onElementRemoved: { updatedHTML in
                     store.saveReaderEdits(for: item.id, text: updatedHTML, isHTML: true)
                 }
             )
         } else {
-            ReaderContentView(text: item.contentText, fontChoice: fontChoice, onEditSource: beginEditing)
+            ReaderContentView(text: item.contentText, fontChoice: fontChoice, fontScale: fontScale, onEditSource: beginEditing)
         }
     }
 
@@ -308,7 +391,7 @@ struct EditableReaderView: View {
             Divider()
 
             TextEditor(text: $draftText)
-                .font(isEditingHTML ? .system(size: 13, design: .monospaced) : fontChoice.swiftUIFont)
+                .font(isEditingHTML ? .system(size: 13, design: .monospaced) : fontChoice.swiftUIFont(scale: fontScale))
                 .lineSpacing(6)
                 .padding(.horizontal, 44)
                 .padding(.vertical, 30)
@@ -411,10 +494,20 @@ struct BookmarkDetailView: View {
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var showingSettings = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
+    @AppStorage("readerFontScale") private var readerFontScale = 1.0
 
     private var readerFontChoice: ReaderFontChoice {
         get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
         nonmutating set { readerFontChoiceRaw = newValue.rawValue }
+    }
+
+    private var previewModes: [BookmarkPreviewMode] {
+        switch item.kind {
+        case .webPage, .githubRepo:
+            return item.url == nil ? [.reader, .notes] : [.reader, .notes, .web]
+        default:
+            return [.reader, .notes]
+        }
     }
 
     var body: some View {
@@ -425,6 +518,12 @@ struct BookmarkDetailView: View {
         }
         .onChange(of: item.id) { _ in
             previewMode = .reader
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousPreviewTab)) { _ in
+            movePreviewTab(by: -1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectNextPreviewTab)) { _ in
+            movePreviewTab(by: 1)
         }
     }
 
@@ -462,15 +561,15 @@ struct BookmarkDetailView: View {
 
                 Spacer()
 
-                if item.url != nil && (item.kind == .webPage || item.kind == .githubRepo) {
+                if previewModes.count > 1 {
                     Picker("", selection: $previewMode) {
-                        ForEach(BookmarkPreviewMode.allCases) { mode in
+                        ForEach(previewModes) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 150)
+                    .frame(width: CGFloat(previewModes.count) * 72)
                 }
 
                 Button {
@@ -516,52 +615,76 @@ struct BookmarkDetailView: View {
 
     @ViewBuilder
     private var preview: some View {
-        switch item.kind {
-        case .image:
-            if let url = item.url ?? item.fileURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit().padding(16)
-                    case .failure:
-                        textReader
-                    case .empty:
-                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                    @unknown default:
-                        textReader
+        if previewMode == .notes {
+            noteReader
+        } else {
+            switch item.kind {
+            case .image:
+                if let url = item.url ?? item.fileURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFit().padding(16)
+                        case .failure:
+                            textReader
+                        case .empty:
+                            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                        @unknown default:
+                            textReader
+                        }
                     }
-                }
-            } else {
-                textReader
-            }
-        case .video, .podcast, .audio:
-            if let url = item.url ?? item.fileURL {
-                VStack(spacing: 12) {
-                    VideoPlayer(player: AVPlayer(url: url))
-                        .frame(minHeight: 300)
-                    textReader
-                }
-            } else {
-                textReader
-            }
-        case .webPage, .githubRepo:
-            if let url = item.url {
-                if previewMode == .web {
-                    WebPreview(url: url)
                 } else {
                     textReader
                 }
-            } else {
+            case .video, .podcast, .audio:
+                if let url = item.url ?? item.fileURL {
+                    VStack(spacing: 12) {
+                        VideoPlayer(player: AVPlayer(url: url))
+                            .frame(minHeight: 300)
+                        textReader
+                    }
+                } else {
+                    textReader
+                }
+            case .webPage, .githubRepo:
+                if let url = item.url {
+                    if previewMode == .web {
+                        WebPreview(url: url)
+                    } else {
+                        textReader
+                    }
+                } else {
+                    textReader
+                }
+            case .file, .note:
                 textReader
             }
-        case .file, .note:
-            textReader
         }
     }
 
     @ViewBuilder
     private var textReader: some View {
-        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice)
+        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice, fontScale: readerFontScale)
+    }
+
+    @ViewBuilder
+    private var noteReader: some View {
+        ReaderContentView(
+            text: item.note ?? "",
+            fontChoice: readerFontChoice,
+            fontScale: readerFontScale,
+            emptyMessage: "No notes yet."
+        )
+    }
+
+    private func movePreviewTab(by offset: Int) {
+        let modes = previewModes
+        guard !modes.isEmpty else { return }
+        guard let currentIndex = modes.firstIndex(of: previewMode) else {
+            previewMode = modes[0]
+            return
+        }
+        previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
     }
 }
 
@@ -715,17 +838,56 @@ struct FlowTags: View {
 struct WebPreview: NSViewRepresentable {
     let url: URL
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.allowsBackForwardNavigationGestures = true
+        context.coordinator.webView = view
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.webView = nsView
         if nsView.url != url {
             nsView.load(URLRequest(url: url))
+        }
+    }
+
+    final class Coordinator {
+        weak var webView: WKWebView?
+        private var observers: [NSObjectProtocol] = []
+        private let step = 420
+
+        init() {
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedScrollPostDown,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.scroll(by: 1)
+            })
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedScrollPostUp,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.scroll(by: -1)
+            })
+        }
+
+        deinit {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+
+        private func scroll(by direction: Int) {
+            webView?.evaluateJavaScript("window.scrollBy({ top: \(step * direction), left: 0, behavior: 'smooth' });")
         }
     }
 }

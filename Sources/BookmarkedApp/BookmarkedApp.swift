@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BookmarkedClient
 
 @main
 struct BookmarkedApp: App {
@@ -27,12 +28,50 @@ struct BookmarkedApp: App {
                     toggleSidebarAction?()
                 }
                 .keyboardShortcut("b", modifiers: .command)
+
+                Divider()
+
+                Button("Previous Bookmark") {
+                    NotificationCenter.default.post(name: .bookmarkedSelectPreviousItem, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .control)
+
+                Button("Next Bookmark") {
+                    NotificationCenter.default.post(name: .bookmarkedSelectNextItem, object: nil)
+                }
+                .keyboardShortcut("j", modifiers: .control)
+
+                Divider()
+
+                Button("Previous Tab") {
+                    NotificationCenter.default.post(name: .bookmarkedSelectPreviousPreviewTab, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: .control)
+
+                Button("Next Tab") {
+                    NotificationCenter.default.post(name: .bookmarkedSelectNextPreviewTab, object: nil)
+                }
+                .keyboardShortcut(".", modifiers: .control)
+
+                Divider()
+
+                Button("Increase Reader Font Size") {
+                    increaseReaderFontAction?()
+                }
+                .keyboardShortcut("+", modifiers: .command)
+
+                Button("Decrease Reader Font Size") {
+                    decreaseReaderFontAction?()
+                }
+                .keyboardShortcut("-", modifiers: .command)
             }
         }
     }
 
     @FocusedValue(\.toggleSidebarAction) private var toggleSidebarAction
     @FocusedValue(\.saveReaderEditAction) private var saveReaderEditAction
+    @FocusedValue(\.increaseReaderFontAction) private var increaseReaderFontAction
+    @FocusedValue(\.decreaseReaderFontAction) private var decreaseReaderFontAction
 }
 
 private struct ToggleSidebarActionKey: FocusedValueKey {
@@ -40,6 +79,14 @@ private struct ToggleSidebarActionKey: FocusedValueKey {
 }
 
 private struct SaveReaderEditActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+private struct IncreaseReaderFontActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+private struct DecreaseReaderFontActionKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
@@ -53,14 +100,32 @@ extension FocusedValues {
         get { self[SaveReaderEditActionKey.self] }
         set { self[SaveReaderEditActionKey.self] = newValue }
     }
+
+    var increaseReaderFontAction: (() -> Void)? {
+        get { self[IncreaseReaderFontActionKey.self] }
+        set { self[IncreaseReaderFontActionKey.self] = newValue }
+    }
+
+    var decreaseReaderFontAction: (() -> Void)? {
+        get { self[DecreaseReaderFontActionKey.self] }
+        set { self[DecreaseReaderFontActionKey.self] = newValue }
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager: HotKeyManager?
+    private var broker: BookmarkedBroker?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         CaptureService.promptForAccessibilityIfNeeded()
+
+        do {
+            broker = try BookmarkedBroker(port: BookmarkedDefaults.brokerPort, store: BookmarkStore.shared)
+            broker?.start()
+        } catch {
+            NSLog("Bookmarked broker: could not start: \(error)")
+        }
 
         hotKeyManager = HotKeyManager {
             Task { @MainActor in
