@@ -109,46 +109,13 @@ private final class BookmarkedWindow: NSWindow {
         switch event.charactersIgnoringModifiers {
         case "j":
             NotificationCenter.default.post(name: .bookmarkedScrollPostDown, object: nil)
-            scrollDominantContentView(by: 1)
             return true
         case "k":
             NotificationCenter.default.post(name: .bookmarkedScrollPostUp, object: nil)
-            scrollDominantContentView(by: -1)
             return true
         default:
             return false
         }
-    }
-
-    private func scrollDominantContentView(by direction: CGFloat) {
-        guard let contentView else { return }
-        let scrollViews = allScrollViews(in: contentView)
-            .filter { !$0.isHidden && $0.window === self && $0.documentView != nil }
-        guard let scrollView = scrollViews.max(by: { score($0) < score($1) }) else { return }
-
-        let step: CGFloat = 420
-        let clipView = scrollView.contentView
-        let documentHeight = scrollView.documentView?.bounds.height ?? 0
-        let maxY = max(0, documentHeight - clipView.bounds.height)
-        let nextY = min(max(clipView.bounds.origin.y + (step * direction), 0), maxY)
-        clipView.animator().setBoundsOrigin(NSPoint(x: clipView.bounds.origin.x, y: nextY))
-        scrollView.reflectScrolledClipView(clipView)
-    }
-
-    private func allScrollViews(in view: NSView) -> [NSScrollView] {
-        var result = view.subviews.flatMap { allScrollViews(in: $0) }
-        if let scrollView = view as? NSScrollView {
-            result.append(scrollView)
-        }
-        return result
-    }
-
-    private func score(_ scrollView: NSScrollView) -> CGFloat {
-        guard let container = contentView else { return 0 }
-        let frame = scrollView.convert(scrollView.bounds, to: container)
-        let visibleArea = max(0, frame.width) * max(0, frame.height)
-        let detailBias: CGFloat = frame.midX > container.bounds.midX ? 1.8 : 1.0
-        return visibleArea * detailBias
     }
 
     private func isEditingText(in responder: NSResponder?) -> Bool {
