@@ -58,6 +58,50 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertEqual(candidates[1], .remote(URL(string: "https://example.com/touch.png")!))
     }
 
+    func testReaderImageCacheStoresImagesAndRewritesHTML() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BookmarkedTests-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let cache = ReaderImageCache(directory: directory) { request in
+            XCTAssertTrue([
+                URL(string: "https://example.com/images/photo.png")!,
+                URL(string: "https://example.com/images/photo-small.png")!
+            ].contains(request.url!))
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "image/png"]
+            )!
+            return (Data([0x89, 0x50, 0x4E, 0x47]), response)
+        }
+
+        let html = #"<article><img src="/images/photo.png" srcset="/images/photo-small.png 1x, /images/photo.png 2x" alt="Local"><a href="/images/photo.png">open</a></article>"#
+        let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
+
+        XCTAssertTrue(rewritten.contains("src=\"file://"))
+        XCTAssertTrue(rewritten.contains("srcset=\"file://"))
+        XCTAssertTrue(rewritten.contains(#"href="/images/photo.png""#))
+        XCTAssertFalse(rewritten.contains(#"src="/images/photo.png""#))
+        XCTAssertFalse(rewritten.contains(#"/images/photo-small.png"#))
+
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(try Data(contentsOf: files[0]), Data([0x89, 0x50, 0x4E, 0x47]))
+    }
+
+    func testReaderImageCacheDetectsOnlyRemoteMedia() {
+        let cache = ReaderImageCache()
+        let pageURL = URL(string: "https://example.com/posts/a")!
+
+        XCTAssertTrue(cache.hasRemoteImages(in: #"<img src="/image.png">"#, pageURL: pageURL))
+        XCTAssertFalse(cache.hasRemoteImages(in: #"<img src="file:///tmp/image.png">"#, pageURL: pageURL))
+        XCTAssertFalse(cache.hasRemoteImages(in: #"<a href="/image.png">open</a>"#, pageURL: pageURL))
+    }
+
     func testReaderFontPreferencesBuildEscapedCSSFamilies() {
         let preferences = ReaderFontPreferences(
             serifName: "Literata",

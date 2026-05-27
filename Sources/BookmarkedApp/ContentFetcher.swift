@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct FetchedContent {
     var title: String?
@@ -22,7 +23,12 @@ enum ContentFetcher {
         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
 
         if mime.contains("text/html") || text.localizedCaseInsensitiveContains("<html") {
-            return HTMLContentExtractor.extract(from: text, url: url)
+            let pageURL = response.url ?? url
+            var content = HTMLContentExtractor.extract(from: text, url: pageURL)
+            if let html = content.html {
+                content.html = await ReaderImageCache.shared.localizingImages(in: html, pageURL: pageURL)
+            }
+            return content
         }
 
         if mime.contains("text/") || mime.contains("json") || mime.contains("xml") {
@@ -41,6 +47,114 @@ enum ContentFetcher {
         let data = try Data(contentsOf: url)
         let text = String(data: data, encoding: .utf8) ?? ""
         return FetchedContent(title: url.lastPathComponent, creator: nil, summary: text.prefixSummary, text: text, html: nil)
+    }
+}
+
+struct ReaderImageCache: Sendable {
+    static let shared = ReaderImageCache()
+
+    private let directory: URL
+    private let fetchData: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+    var readAccessDirectory: URL {
+        directory.deletingLastPathComponent()
+    }
+
+    init(
+        directory: URL = ReaderImageCache.defaultDirectory(),
+        fetchData: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+            try await URLSession.shared.data(for: request)
+        }
+    ) {
+        self.directory = directory
+        self.fetchData = fetchData
+    }
+
+    func localizingImages(in html: String, pageURL: URL) async -> String {
+        let remoteURLs = Array(html.mediaResourceURLs(baseURL: pageURL).prefix(40))
+        guard !remoteURLs.isEmpty else { return html }
+
+        var localURLs: [URL: URL] = [:]
+        await withTaskGroup(of: (URL, URL?).self) { group in
+            for remoteURL in remoteURLs {
+                group.addTask {
+                    (remoteURL, await cacheImage(from: remoteURL))
+                }
+            }
+            for await (remoteURL, localURL) in group {
+                guard let localURL else { continue }
+                localURLs[remoteURL] = localURL
+            }
+        }
+
+        guard !localURLs.isEmpty else { return html }
+        return html.replacingMediaResourceURLs(baseURL: pageURL, localURLs: localURLs)
+    }
+
+    func hasRemoteImages(in html: String, pageURL: URL) -> Bool {
+        !html.mediaResourceURLs(baseURL: pageURL).isEmpty
+    }
+
+    private func cacheImage(from url: URL) async -> URL? {
+        guard url.scheme == "http" || url.scheme == "https" else { return nil }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        request.setValue("Bookmarked/0.1 (+macOS bookmark image cache)", forHTTPHeaderField: "User-Agent")
+        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await fetchData(request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), !data.isEmpty else {
+                return nil
+            }
+
+            let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+            guard contentType.contains("image/") || isLikelyImageURL(url) else { return nil }
+
+            let fileURL = directory
+                .appendingPathComponent(Self.cacheKey(for: url))
+                .appendingPathExtension(Self.fileExtension(for: url, contentType: contentType))
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
+    private static func defaultDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("Bookmarked", isDirectory: true)
+            .appendingPathComponent("ReaderImages", isDirectory: true)
+    }
+
+    private static func cacheKey(for url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func fileExtension(for url: URL, contentType: String) -> String {
+        switch contentType.split(separator: ";").first?.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "image/jpeg", "image/jpg": return "jpg"
+        case "image/png": return "png"
+        case "image/gif": return "gif"
+        case "image/webp": return "webp"
+        case "image/avif": return "avif"
+        case "image/svg+xml": return "svg"
+        default:
+            let ext = url.pathExtension.lowercased()
+            return ext.isEmpty ? "img" : ext
+        }
+    }
+
+    private func isLikelyImageURL(_ url: URL) -> Bool {
+        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].contains(url.pathExtension.lowercased())
     }
 }
 
@@ -217,6 +331,149 @@ private extension String {
             result.replaceSubrange(full, with: "\(attr)=\"\(absolute.absoluteString)\"")
         }
         return result
+    }
+
+    func mediaResourceURLs(baseURL: URL) -> [URL] {
+        var urls: [URL] = []
+        for tag in mediaTags {
+            urls.append(contentsOf: tag.mediaAttributeURLs(baseURL: baseURL))
+            urls.append(contentsOf: tag.srcsetURLs(baseURL: baseURL))
+        }
+        var seen = Set<URL>()
+        return urls.filter { url in
+            guard !seen.contains(url) else { return false }
+            seen.insert(url)
+            return true
+        }
+    }
+
+    func replacingMediaResourceURLs(baseURL: URL, localURLs: [URL: URL]) -> String {
+        var result = self
+        for match in mediaTagMatches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let originalTag = String(self[originalRange])
+            let rewritten = originalTag.replacingMediaReferences(baseURL: baseURL, localURLs: localURLs)
+            result.replaceSubrange(tagRange, with: rewritten)
+        }
+        return result
+    }
+
+    private var mediaTags: [String] {
+        mediaTagMatches.compactMap { match in
+            guard let range = Range(match.range, in: self) else { return nil }
+            return String(self[range])
+        }
+    }
+
+    private var mediaTagMatches: [NSTextCheckingResult] {
+        guard let regex = try? NSRegularExpression(pattern: "<(?:img|source|video|amp-img)\\b[^>]*>", options: [.caseInsensitive]) else {
+            return []
+        }
+        return regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+    }
+
+    private func mediaAttributeURLs(baseURL: URL) -> [URL] {
+        guard let regex = try? NSRegularExpression(pattern: "\\b(src|poster)=(\"([^\"]*)\"|'([^']*)')", options: [.caseInsensitive]) else {
+            return []
+        }
+        return regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self)).compactMap { match in
+            let valueRange = match.range(at: 3).location != NSNotFound ? match.range(at: 3) : match.range(at: 4)
+            guard let range = Range(valueRange, in: self) else { return nil }
+            return Self.resolvedMediaURL(String(self[range]), baseURL: baseURL)
+        }
+    }
+
+    private func srcsetURLs(baseURL: URL) -> [URL] {
+        srcsetValues.flatMap { value in
+            value.split(separator: ",").compactMap { candidate -> URL? in
+                let raw = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let first = raw.split(whereSeparator: { $0 == " " || $0 == "\t" }).first else { return nil }
+                return Self.resolvedMediaURL(String(first), baseURL: baseURL)
+            }
+        }
+    }
+
+    private var srcsetValues: [String] {
+        guard let regex = try? NSRegularExpression(pattern: "\\bsrcset=(\"([^\"]*)\"|'([^']*)')", options: [.caseInsensitive]) else {
+            return []
+        }
+        return regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self)).compactMap { match in
+            let valueRange = match.range(at: 2).location != NSNotFound ? match.range(at: 2) : match.range(at: 3)
+            guard let range = Range(valueRange, in: self) else { return nil }
+            return String(self[range])
+        }
+    }
+
+    private func replacingMediaReferences(baseURL: URL, localURLs: [URL: URL]) -> String {
+        var result = replacingSrcsetReferences(baseURL: baseURL, localURLs: localURLs)
+        guard let regex = try? NSRegularExpression(pattern: "\\b(src|poster)=(\"([^\"]*)\"|'([^']*)')", options: [.caseInsensitive]) else {
+            return result
+        }
+        let matches = regex.matches(in: result, range: NSRange(result.startIndex..<result.endIndex, in: result))
+        for match in matches.reversed() {
+            let valueIndex = match.range(at: 3).location != NSNotFound ? 3 : 4
+            guard let valueRange = Range(match.range(at: valueIndex), in: result) else { continue }
+            let rawValue = String(result[valueRange])
+            guard let remoteURL = Self.resolvedMediaURL(rawValue, baseURL: baseURL),
+                  let localURL = localURLs[remoteURL] else {
+                continue
+            }
+            result.replaceSubrange(valueRange, with: localURL.absoluteString)
+        }
+        return result
+    }
+
+    private func replacingSrcsetReferences(baseURL: URL, localURLs: [URL: URL]) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\bsrcset=(\"([^\"]*)\"|'([^']*)')", options: [.caseInsensitive]) else {
+            return self
+        }
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            let valueIndex = match.range(at: 2).location != NSNotFound ? 2 : 3
+            guard let valueRange = Range(match.range(at: valueIndex), in: result),
+                  let originalValueRange = Range(match.range(at: valueIndex), in: self) else {
+                continue
+            }
+            let rewritten = String(self[originalValueRange])
+                .split(separator: ",")
+                .map { candidate -> String in
+                    let raw = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let parts = raw.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" })
+                    guard let first = parts.first,
+                          let remoteURL = Self.resolvedMediaURL(String(first), baseURL: baseURL),
+                          let localURL = localURLs[remoteURL] else {
+                        return raw
+                    }
+                    if parts.count > 1 {
+                        return "\(localURL.absoluteString) \(parts[1])"
+                    }
+                    return localURL.absoluteString
+                }
+                .joined(separator: ", ")
+            result.replaceSubrange(valueRange, with: rewritten)
+        }
+        return result
+    }
+
+    private static func resolvedMediaURL(_ rawValue: String, baseURL: URL) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lowercased = trimmed.lowercased()
+        guard !lowercased.hasPrefix("data:"),
+              !lowercased.hasPrefix("javascript:"),
+              !lowercased.hasPrefix("mailto:"),
+              !lowercased.hasPrefix("#") else {
+            return nil
+        }
+        guard let url = URL(string: trimmed, relativeTo: baseURL)?.absoluteURL,
+              url.scheme == "http" || url.scheme == "https" else {
+            return nil
+        }
+        return url
     }
 
     private func replacingNumericHTMLEntities() -> String {

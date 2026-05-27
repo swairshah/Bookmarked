@@ -16,6 +16,7 @@ final class BookmarkStore: ObservableObject {
     private let decoder: JSONDecoder
     private let ioQueue = DispatchQueue(label: "bookmarked.store.io", qos: .utility)
     private var saveWorkItem: DispatchWorkItem?
+    private var imageLocalizationTasks = Set<UUID>()
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -231,6 +232,12 @@ final class BookmarkStore: ObservableObject {
         if item.readerHTML == nil, item.readerEditedAt == nil, item.url != nil, (item.kind == .webPage || item.kind == .githubRepo) {
             refresh(item)
         }
+
+        if let url = item.url,
+           let html = item.readerHTML,
+           ReaderImageCache.shared.hasRemoteImages(in: html, pageURL: url) {
+            localizeReaderImages(for: item.id, html: html, pageURL: url)
+        }
     }
 
     func captureFrontmostContext(openWindowAfterCapture: Bool = false) {
@@ -312,6 +319,25 @@ final class BookmarkStore: ObservableObject {
                 faviconData: await FaviconFetcher.fetch(for: url),
                 tags: inferredTags(for: url, kind: kind)
             ))
+        }
+    }
+
+    private func localizeReaderImages(for itemID: UUID, html: String, pageURL: URL) {
+        guard !imageLocalizationTasks.contains(itemID) else { return }
+        imageLocalizationTasks.insert(itemID)
+        Task {
+            let localizedHTML = await ReaderImageCache.shared.localizingImages(in: html, pageURL: pageURL)
+            await MainActor.run {
+                self.imageLocalizationTasks.remove(itemID)
+                guard localizedHTML != html,
+                      let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                      self.items[idx].readerHTML == html else {
+                    return
+                }
+                self.items[idx].readerHTML = localizedHTML
+                self.items[idx].updatedAt = Date()
+                self.scheduleSave()
+            }
         }
     }
 

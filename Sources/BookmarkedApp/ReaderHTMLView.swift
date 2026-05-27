@@ -130,7 +130,15 @@ struct ReaderHTMLView: NSViewRepresentable {
 
         if context.coordinator.lastHTML != document {
             context.coordinator.lastHTML = document
-            nsView.loadHTMLString(document, baseURL: baseURL)
+            if document.contains("file://"),
+               let documentURL = context.coordinator.writeLocalDocument(document) {
+                nsView.loadFileURL(
+                    documentURL,
+                    allowingReadAccessTo: ReaderImageCache.shared.readAccessDirectory
+                )
+            } else {
+                nsView.loadHTMLString(document, baseURL: baseURL)
+            }
         }
     }
 
@@ -148,6 +156,9 @@ struct ReaderHTMLView: NSViewRepresentable {
         var onElementRemoved: ((String) -> Void)?
         weak var webView: WKWebView?
         private var observers: [NSObjectProtocol] = []
+        private let documentURL = ReaderImageCache.shared.readAccessDirectory
+            .appendingPathComponent("ReaderDocuments", isDirectory: true)
+            .appendingPathComponent("\(UUID().uuidString).html")
 
         override init() {
             super.init()
@@ -171,12 +182,26 @@ struct ReaderHTMLView: NSViewRepresentable {
             for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
             }
+            try? FileManager.default.removeItem(at: documentURL)
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "readerEdit", let html = message.body as? String else { return }
             Task { @MainActor in
                 self.onElementRemoved?(html)
+            }
+        }
+
+        func writeLocalDocument(_ document: String) -> URL? {
+            do {
+                try FileManager.default.createDirectory(
+                    at: documentURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try document.write(to: documentURL, atomically: true, encoding: .utf8)
+                return documentURL
+            } catch {
+                return nil
             }
         }
 
