@@ -33,6 +33,7 @@ struct MainWindowView: View {
     @State private var query = ""
     @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
+    @AppStorage("readerMonoFontName") private var sidebarMonoFontName = ReaderFontPreferences.defaultMonoName
     @FocusState private var focusedField: MainWindowFocusField?
 
     private var results: [BookmarkItem] {
@@ -43,23 +44,27 @@ struct MainWindowView: View {
         store.item(id: controller.selection) ?? results.first
     }
 
+    private var sidebarFontPreferences: ReaderFontPreferences {
+        ReaderFontPreferences(
+            serifName: ReaderFontPreferences.defaultSerifName,
+            sansName: ReaderFontPreferences.defaultSansName,
+            monoName: sidebarMonoFontName
+        )
+    }
+
     var body: some View {
         Group {
             if controller.isFullScreen, let selectedItem {
                 FullScreenReaderView(item: selectedItem, store: store)
             } else {
-                VStack(spacing: 0) {
-                    topBar
-                    Divider()
-                    HStack(spacing: 0) {
-                        if isSidebarVisible {
-                            sidebar
-                                .frame(width: sidebarWidth)
-                            ResizableSidebarDivider(width: $sidebarWidth)
-                        }
-                        detail
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    if isSidebarVisible {
+                        sidebar
+                            .frame(width: sidebarWidth)
+                        ResizableSidebarDivider(width: $sidebarWidth)
                     }
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -97,43 +102,34 @@ struct MainWindowView: View {
         }
     }
 
-    private var topBar: some View {
-        HStack(spacing: 10) {
-            AppBrandIcon(size: 24)
-
-            TextField("Search content, creator, date, source, or URL", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 520)
-                .focused($focusedField, equals: .search)
-
-            Spacer()
-
-            if store.isCapturing {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Capturing")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            controller.toggleZoom()
-        }
-    }
-
     private var sidebar: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                AppBrandIcon(size: 22)
+
+                TextField("Search bookmarks", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(sidebarFontPreferences.codeFont(size: 12))
+                    .focused($focusedField, equals: .search)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+
             HStack {
                 Text("\(results.count) bookmarks")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(sidebarFontPreferences.codeFont(size: 12).weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if let status = store.statusMessage {
+                if store.isCapturing {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Capturing")
+                        .font(sidebarFontPreferences.codeFont(size: 11).weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else if let status = store.statusMessage {
                     Text(status)
-                        .font(.system(size: 11))
+                        .font(sidebarFontPreferences.codeFont(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -145,7 +141,7 @@ struct MainWindowView: View {
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         ForEach(results) { item in
-                            BookmarkRow(item: item)
+                            BookmarkRow(item: item, fontPreferences: sidebarFontPreferences)
                                 .id(item.id)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
@@ -223,6 +219,11 @@ struct MainWindowView: View {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         } else {
+            if !isSidebarVisible {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isSidebarVisible = true
+                }
+            }
             focusedField = .search
         }
     }
@@ -237,9 +238,20 @@ struct FullScreenReaderView: View {
     @State private var webFontScale = 1.0
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
+    @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
+    @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
+    @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
 
     private var readerFontChoice: ReaderFontChoice {
         ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif
+    }
+
+    private var readerFontPreferences: ReaderFontPreferences {
+        ReaderFontPreferences(
+            serifName: readerSerifFontName,
+            sansName: readerSansFontName,
+            monoName: readerMonoFontName
+        )
     }
 
     private var previewModes: [BookmarkPreviewMode] {
@@ -311,7 +323,13 @@ struct FullScreenReaderView: View {
 
     @ViewBuilder
     private var textReader: some View {
-        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice, fontScale: readerFontScale)
+        EditableReaderView(
+            item: item,
+            store: store,
+            fontChoice: readerFontChoice,
+            fontPreferences: readerFontPreferences,
+            fontScale: readerFontScale
+        )
     }
 
     @ViewBuilder
@@ -320,6 +338,7 @@ struct FullScreenReaderView: View {
             item: item,
             store: store,
             fontChoice: readerFontChoice,
+            fontPreferences: readerFontPreferences,
             fontScale: readerFontScale,
             focusToken: noteFocusToken
         )
@@ -368,6 +387,7 @@ struct EditableReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     let fontChoice: ReaderFontChoice
+    let fontPreferences: ReaderFontPreferences
     let fontScale: Double
 
     @State private var isEditing = false
@@ -403,6 +423,7 @@ struct EditableReaderView: View {
                 html: html,
                 baseURL: item.url,
                 fontChoice: fontChoice,
+                fontPreferences: fontPreferences,
                 fontScale: fontScale,
                 onEditSource: beginEditing,
                 onElementRemoved: { updatedHTML in
@@ -410,7 +431,13 @@ struct EditableReaderView: View {
                 }
             )
         } else {
-            ReaderContentView(text: item.contentText, fontChoice: fontChoice, fontScale: fontScale, onEditSource: beginEditing)
+            ReaderContentView(
+                text: item.contentText,
+                fontChoice: fontChoice,
+                fontPreferences: fontPreferences,
+                fontScale: fontScale,
+                onEditSource: beginEditing
+            )
         }
     }
 
@@ -446,7 +473,7 @@ struct EditableReaderView: View {
             Divider()
 
             TextEditor(text: $draftText)
-                .font(isEditingHTML ? .system(size: 13, design: .monospaced) : fontChoice.swiftUIFont(scale: fontScale))
+                .font(isEditingHTML ? fontPreferences.codeFont(size: 13) : fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
                 .lineSpacing(6)
                 .padding(.horizontal, 44)
                 .padding(.vertical, 30)
@@ -481,6 +508,7 @@ struct EditableBookmarkNoteView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     let fontChoice: ReaderFontChoice
+    let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     let focusToken: Int
 
@@ -524,6 +552,7 @@ struct EditableBookmarkNoteView: View {
         ReaderContentView(
             text: item.note ?? "",
             fontChoice: fontChoice,
+            fontPreferences: fontPreferences,
             fontScale: fontScale,
             emptyMessage: "No notes yet."
         )
@@ -712,6 +741,7 @@ private extension String {
 
 struct BookmarkRow: View {
     let item: BookmarkItem
+    let fontPreferences: ReaderFontPreferences
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -719,7 +749,7 @@ struct BookmarkRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(fontPreferences.codeFont(size: 13).weight(.semibold))
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     Text(item.kind.rawValue)
@@ -728,11 +758,11 @@ struct BookmarkRow: View {
                         Text(creator)
                     }
                 }
-                .font(.system(size: 11))
+                .font(fontPreferences.codeFont(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 10))
+                    .font(fontPreferences.codeFont(size: 10))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -764,10 +794,21 @@ struct BookmarkDetailView: View {
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
+    @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
+    @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
+    @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
 
     private var readerFontChoice: ReaderFontChoice {
         get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
         nonmutating set { readerFontChoiceRaw = newValue.rawValue }
+    }
+
+    private var readerFontPreferences: ReaderFontPreferences {
+        ReaderFontPreferences(
+            serifName: readerSerifFontName,
+            sansName: readerSansFontName,
+            monoName: readerMonoFontName
+        )
     }
 
     private var previewModes: [BookmarkPreviewMode] {
@@ -835,6 +876,18 @@ struct BookmarkDetailView: View {
                 .help(item.url != nil || item.fileURL != nil ? "Double-click to open" : "")
 
             Spacer(minLength: 12)
+
+            Button {
+                showingSettings.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .help("Reader settings")
+            .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
+                readerSettingsPopover
+            }
 
             if previewModes.count > 1 {
                 Picker("", selection: $previewMode) {
@@ -923,12 +976,7 @@ struct BookmarkDetailView: View {
                 .buttonStyle(.bordered)
                 .help("Reader settings")
                 .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
-                    ReaderSettingsPanel(
-                        fontChoice: Binding(
-                            get: { readerFontChoice },
-                            set: { readerFontChoice = $0 }
-                        )
-                    )
+                    readerSettingsPopover
                 }
             }
 
@@ -941,6 +989,18 @@ struct BookmarkDetailView: View {
         .onAppear {
             store.ensureAssets(for: item)
         }
+    }
+
+    private var readerSettingsPopover: some View {
+        ReaderSettingsContent(
+            fontChoice: Binding(
+                get: { readerFontChoice },
+                set: { readerFontChoice = $0 }
+            ),
+            serifFontName: $readerSerifFontName,
+            sansFontName: $readerSansFontName,
+            monoFontName: $readerMonoFontName
+        )
     }
 
     @ViewBuilder
@@ -994,7 +1054,13 @@ struct BookmarkDetailView: View {
 
     @ViewBuilder
     private var textReader: some View {
-        EditableReaderView(item: item, store: store, fontChoice: readerFontChoice, fontScale: readerFontScale)
+        EditableReaderView(
+            item: item,
+            store: store,
+            fontChoice: readerFontChoice,
+            fontPreferences: readerFontPreferences,
+            fontScale: readerFontScale
+        )
     }
 
     @ViewBuilder
@@ -1003,6 +1069,7 @@ struct BookmarkDetailView: View {
             item: item,
             store: store,
             fontChoice: readerFontChoice,
+            fontPreferences: readerFontPreferences,
             fontScale: readerFontScale,
             focusToken: noteFocusToken
         )
@@ -1083,11 +1150,48 @@ private struct ResizableSidebarDivider: View {
     }
 }
 
-struct ReaderSettingsPanel: View {
-    @Binding var fontChoice: ReaderFontChoice
+struct ReaderSettingsView: View {
+    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
+    @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
+    @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
+    @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
+
+    private var readerFontChoice: ReaderFontChoice {
+        get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
+        nonmutating set { readerFontChoiceRaw = newValue.rawValue }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        ReaderSettingsContent(
+            fontChoice: Binding(
+                get: { readerFontChoice },
+                set: { readerFontChoice = $0 }
+            ),
+            serifFontName: $readerSerifFontName,
+            sansFontName: $readerSansFontName,
+            monoFontName: $readerMonoFontName
+        )
+        .frame(width: 360, alignment: .leading)
+        .padding(18)
+    }
+}
+
+struct ReaderSettingsContent: View {
+    @Binding var fontChoice: ReaderFontChoice
+    @Binding var serifFontName: String
+    @Binding var sansFontName: String
+    @Binding var monoFontName: String
+
+    private var fontPreferences: ReaderFontPreferences {
+        ReaderFontPreferences(
+            serifName: serifFontName,
+            sansName: sansFontName,
+            monoName: monoFontName
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Image(systemName: "gearshape")
                     .foregroundStyle(.secondary)
@@ -1096,7 +1200,7 @@ struct ReaderSettingsPanel: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Font")
+                Text("Body Style")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Picker("", selection: $fontChoice) {
@@ -1108,9 +1212,125 @@ struct ReaderSettingsPanel: View {
                 .labelsHidden()
                 .frame(width: 210)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                ReaderFontNameField(
+                    title: "Serif",
+                    text: $serifFontName,
+                    defaultName: ReaderFontPreferences.defaultSerifName
+                )
+                ReaderFontNameField(
+                    title: "Sans",
+                    text: $sansFontName,
+                    defaultName: ReaderFontPreferences.defaultSansName
+                )
+                ReaderFontNameField(
+                    title: "Mono",
+                    text: $monoFontName,
+                    defaultName: ReaderFontPreferences.defaultMonoName
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Preview")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("A reader paragraph with code")
+                    .font(fontChoice.swiftUIFont(preferences: fontPreferences))
+                Text("Headings use the sans font")
+                    .font(fontPreferences.headingFont(level: 3).weight(.semibold))
+                Text("let mono = \"code\"")
+                    .font(fontPreferences.codeFont(size: 13))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
-        .frame(width: 250, alignment: .leading)
+        .frame(width: 300, alignment: .leading)
+    }
+}
+
+private struct ReaderFontNameField: View {
+    let title: String
+    @Binding var text: String
+    let defaultName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") {
+                    text = defaultName
+                }
+                .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines) == defaultName)
+            }
+
+            FontFamilyComboBox(
+                text: $text,
+                placeholder: defaultName,
+                fontFamilies: ReaderFontPreferences.availableFontFamilyNames
+            )
+            .frame(height: 24)
+        }
+    }
+}
+
+private struct FontFamilyComboBox: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let fontFamilies: [String]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSComboBox {
+        let comboBox = NSComboBox()
+        comboBox.usesDataSource = false
+        comboBox.completes = true
+        comboBox.numberOfVisibleItems = 12
+        comboBox.placeholderString = placeholder
+        comboBox.font = NSFont.systemFont(ofSize: 12)
+        comboBox.delegate = context.coordinator
+        comboBox.addItems(withObjectValues: fontFamilies)
+        return comboBox
+    }
+
+    func updateNSView(_ comboBox: NSComboBox, context: Context) {
+        context.coordinator.text = $text
+        if comboBox.numberOfItems != fontFamilies.count {
+            comboBox.removeAllItems()
+            comboBox.addItems(withObjectValues: fontFamilies)
+        }
+        comboBox.placeholderString = placeholder
+        if comboBox.stringValue != text {
+            comboBox.stringValue = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSComboBoxDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            text.wrappedValue = comboBox.stringValue
+        }
+
+        func comboBoxSelectionDidChange(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            text.wrappedValue = comboBox.stringValue
+        }
     }
 }
 

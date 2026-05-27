@@ -3,6 +3,7 @@ import SwiftUI
 struct ReaderContentView: View {
     let text: String
     let fontChoice: ReaderFontChoice
+    let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     var emptyMessage = "No indexed text yet."
     var onEditSource: (() -> Void)?
@@ -63,32 +64,23 @@ struct ReaderContentView: View {
         switch block.kind {
         case .heading(let level):
             Text(block.inlineAttributed)
-                .font(.system(size: headingSize(level), weight: .semibold))
+                .font(fontPreferences.headingFont(level: level).weight(.semibold))
                 .lineSpacing(3)
                 .padding(.top, level == 1 ? 8 : 12)
                 .padding(.bottom, 2)
         case .paragraph:
             Text(block.inlineAttributed)
-                .font(fontChoice.swiftUIFont(scale: fontScale))
+                .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
                 .lineSpacing(7)
         case .bullet:
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("•")
                     .font(.system(size: 17, weight: .semibold))
                 Text(block.inlineAttributed)
-                    .font(fontChoice.swiftUIFont(scale: fontScale))
+                    .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
                     .lineSpacing(6)
             }
             .padding(.leading, 8)
-        }
-    }
-
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: return 30
-        case 2: return 24
-        case 3: return 20
-        default: return 18
         }
     }
 }

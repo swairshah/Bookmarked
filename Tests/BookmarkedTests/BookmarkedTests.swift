@@ -57,4 +57,17 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertEqual(candidates[0], .dataURI("data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"))
         XCTAssertEqual(candidates[1], .remote(URL(string: "https://example.com/touch.png")!))
     }
+
+    func testReaderFontPreferencesBuildEscapedCSSFamilies() {
+        let preferences = ReaderFontPreferences(
+            serifName: "Literata",
+            sansName: "Avenir Next",
+            monoName: "JetBrains \"Mono\""
+        )
+
+        XCTAssertTrue(preferences.cssFontFamily(for: .serif).contains(#""Literata""#))
+        XCTAssertTrue(preferences.cssHeadingFontFamily.contains(#""Avenir Next""#))
+        XCTAssertTrue(preferences.cssMonoFontFamily.contains(#""JetBrains \"Mono\"""#))
+        XCTAssertTrue(preferences.cssMonoFontFamily.contains("ui-monospace"))
+    }
 }

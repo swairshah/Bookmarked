@@ -68,7 +68,18 @@ struct BookmarkedApp: App {
                     decreaseReaderFontAction?()
                 }
                 .keyboardShortcut("-", modifiers: .command)
+
+                Divider()
+
+                Button("Reader Settings...") {
+                    ReaderSettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
+        }
+
+        Settings {
+            ReaderSettingsView()
         }
     }
 
@@ -113,6 +124,34 @@ extension FocusedValues {
     var decreaseReaderFontAction: (() -> Void)? {
         get { self[DecreaseReaderFontActionKey.self] }
         set { self[DecreaseReaderFontActionKey.self] = newValue }
+    }
+}
+
+final class ReaderSettingsWindowController {
+    static let shared = ReaderSettingsWindowController()
+
+    private var window: NSWindow?
+
+    private init() {}
+
+    @MainActor
+    func show() {
+        let window = window ?? makeWindow()
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
+    private func makeWindow() -> NSWindow {
+        let controller = NSHostingController(rootView: ReaderSettingsView())
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Reader Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 360, height: 390))
+        window.center()
+        return window
     }
 }
 

@@ -6,6 +6,7 @@ struct ReaderHTMLView: NSViewRepresentable {
     let html: String
     let baseURL: URL?
     let fontChoice: ReaderFontChoice
+    let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     var onEditSource: (() -> Void)?
     var onElementRemoved: ((String) -> Void)?
@@ -37,7 +38,7 @@ struct ReaderHTMLView: NSViewRepresentable {
           margin: 0;
           background: transparent;
           color: CanvasText;
-          font-family: \(fontChoice.cssFontFamily);
+          font-family: \(fontChoice.cssFontFamily(preferences: fontPreferences));
           font-size: \(fontChoice.cssFontSize(scale: fontScale));
           line-height: \(fontChoice.cssLineHeight);
         }
@@ -47,7 +48,7 @@ struct ReaderHTMLView: NSViewRepresentable {
           padding: 38px 48px 80px;
         }
         h1, h2, h3, h4, h5, h6 {
-          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+          font-family: \(fontPreferences.cssHeadingFontFamily);
           line-height: 1.18;
           margin: 1.45em 0 0.45em;
           font-weight: 720;
@@ -81,7 +82,7 @@ struct ReaderHTMLView: NSViewRepresentable {
           font-size: 0.86em;
         }
         code {
-          font-family: "SF Mono", ui-monospace, Menlo, monospace;
+          font-family: \(fontPreferences.cssMonoFontFamily);
           font-size: 0.88em;
           background: color-mix(in srgb, CanvasText 8%, transparent);
           padding: 0.12em 0.28em;
