@@ -151,58 +151,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuBarLabel: View {
     let flashToken: Int
-    @State private var flashPhase = false
+    @State private var animationFrame = 0
 
     var body: some View {
-        Group {
-            if let image = flashPhase ? Self.flashIcon : Self.icon {
-                Image(nsImage: image)
-                    .renderingMode(.template)
-                    .accessibilityLabel("Bookmarked")
-            } else {
-                Image(systemName: "bookmark")
-                    .font(.system(size: 16, weight: .medium))
-                    .imageScale(.medium)
-                    .accessibilityLabel("Bookmarked")
-            }
-        }
+        iconImage
+            .id(animationFrame)
+        .frame(width: 30, height: 22)
+        .accessibilityLabel("Bookmarked")
         .onChange(of: flashToken) { _ in
-            flashPhase = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                flashPhase = false
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-                flashPhase = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.48) {
-                flashPhase = false
-            }
+            playBookmarkAnimation()
         }
     }
 
-    private static let icon: NSImage? = {
-        guard let image = loadRetinaImage(
-            name: "menubar",
-            name2x: "menubar@2x",
-            pointSize: NSSize(width: 18, height: 18)
-        ) else {
-            return nil
+    @ViewBuilder
+    private var iconImage: some View {
+        if let image = Self.iconFrames[safe: animationFrame] ?? Self.iconFrames.first {
+            Image(nsImage: image)
+                .renderingMode(.template)
+        } else {
+            Image(systemName: "bookmark")
+                .font(.system(size: 16, weight: .medium))
+                .imageScale(.medium)
         }
-        image.isTemplate = true
-        return image
+    }
+
+    private static let iconFrames: [NSImage] = {
+        ["menubar", "menubar-frame-1", "menubar-frame-2", "menubar-frame-3", "menubar-frame-4", "menubar-frame-5"].compactMap { name in
+            guard let image = loadRetinaImage(
+                name: name,
+                name2x: "\(name)@2x",
+                pointSize: NSSize(width: 22, height: 22)
+            ) else {
+                return nil
+            }
+            image.isTemplate = true
+            return image
+        }
     }()
 
-    private static let flashIcon: NSImage? = {
-        guard let image = loadRetinaImage(
-            name: "menubar-flash",
-            name2x: "menubar-flash@2x",
-            pointSize: NSSize(width: 18, height: 18)
-        ) else {
-            return nil
+    private func playBookmarkAnimation() {
+        let runFrames = [1, 2, 3, 4, 5, 5, 0]
+        for (index, frame) in runFrames.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.18) {
+                animationFrame = frame
+            }
         }
-        image.isTemplate = true
-        return image
-    }()
+    }
 
     private static func loadRetinaImage(name: String, name2x: String, pointSize: NSSize) -> NSImage? {
         guard let url1x = Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Resources"),
@@ -218,5 +212,11 @@ struct MenuBarLabel: View {
             image.addRepresentation(rep2x)
         }
         return image
+    }
+}
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
