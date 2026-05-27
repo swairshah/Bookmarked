@@ -5,7 +5,6 @@ cd "$(dirname "$0")/.."
 
 VERSION="0.1.0"
 swift build -c release --product Bookmarked
-swift build -c release --product bookmarked
 
 BINARY_PATH=".build/release"
 APP_DIR=".build/Bookmarked.app"
@@ -13,7 +12,6 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp "$BINARY_PATH/Bookmarked" "$APP_DIR/Contents/MacOS/Bookmarked"
-cp "$BINARY_PATH/bookmarked" "$APP_DIR/Contents/MacOS/bookmarked"
 
 if [ -d "$BINARY_PATH/Bookmarked_Bookmarked.bundle" ]; then
     cp -R "$BINARY_PATH/Bookmarked_Bookmarked.bundle" "$APP_DIR/Contents/Resources/"
@@ -61,5 +59,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 EOF
 
 echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
+
+swift build -c release --product bookmarked
+cp "$BINARY_PATH/bookmarked" "$APP_DIR/Contents/MacOS/bookmarkedctl"
+
 echo "built: $APP_DIR"
 echo "built: $BINARY_PATH/bookmarked"
