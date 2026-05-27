@@ -4,33 +4,39 @@ import Foundation
 final class HotKeyManager {
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
+    private var registeredShortcut: BookmarkedKeyboardShortcut?
     private let action: () -> Void
 
     init(action: @escaping () -> Void) {
         self.action = action
     }
 
-    func register() {
+    func register(shortcut: BookmarkedKeyboardShortcut) {
+        unregisterHotKey()
+        registeredShortcut = shortcut
+
         var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
         let pointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        InstallEventHandler(
-            GetEventDispatcherTarget(),
-            { _, _, userData in
-                guard let userData else { return noErr }
-                let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
-                manager.action()
-                return noErr
-            },
-            1,
-            &eventSpec,
-            pointer,
-            &handlerRef
-        )
+        if handlerRef == nil {
+            InstallEventHandler(
+                GetEventDispatcherTarget(),
+                { _, _, userData in
+                    guard let userData else { return noErr }
+                    let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                    manager.action()
+                    return noErr
+                },
+                1,
+                &eventSpec,
+                pointer,
+                &handlerRef
+            )
+        }
 
         let hotKeyId = EventHotKeyID(signature: Self.fourCharCode("BKMK"), id: 1)
         RegisterEventHotKey(
-            UInt32(kVK_ANSI_M),
-            UInt32(cmdKey) | UInt32(shiftKey),
+            UInt32(shortcut.keyCode),
+            shortcut.modifiers.carbonModifiers,
             hotKeyId,
             GetEventDispatcherTarget(),
             0,
@@ -39,8 +45,15 @@ final class HotKeyManager {
     }
 
     deinit {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+        unregisterHotKey()
         if let handlerRef { RemoveEventHandler(handlerRef) }
+    }
+
+    private func unregisterHotKey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
     }
 
     private static func fourCharCode(_ string: String) -> OSType {

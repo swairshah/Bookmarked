@@ -55,6 +55,7 @@ struct ReaderImageCache: Sendable {
 
     private let directory: URL
     private let fetchData: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private let isEnabled: @Sendable () -> Bool
 
     var readAccessDirectory: URL {
         directory.deletingLastPathComponent()
@@ -62,15 +63,18 @@ struct ReaderImageCache: Sendable {
 
     init(
         directory: URL = ReaderImageCache.defaultDirectory(),
+        isEnabled: @escaping @Sendable () -> Bool = { BookmarkedRuntimePreferences.cacheReaderImages },
         fetchData: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
             try await URLSession.shared.data(for: request)
         }
     ) {
         self.directory = directory
+        self.isEnabled = isEnabled
         self.fetchData = fetchData
     }
 
     func localizingImages(in html: String, pageURL: URL) async -> String {
+        guard isEnabled() else { return html }
         let remoteURLs = Array(html.mediaResourceURLs(baseURL: pageURL).prefix(40))
         guard !remoteURLs.isEmpty else { return html }
 
@@ -92,7 +96,7 @@ struct ReaderImageCache: Sendable {
     }
 
     func hasRemoteImages(in html: String, pageURL: URL) -> Bool {
-        !html.mediaResourceURLs(baseURL: pageURL).isEmpty
+        isEnabled() && !html.mediaResourceURLs(baseURL: pageURL).isEmpty
     }
 
     private func cacheImage(from url: URL) async -> URL? {

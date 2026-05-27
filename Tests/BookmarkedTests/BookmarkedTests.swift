@@ -65,7 +65,7 @@ final class BookmarkedTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
 
-        let cache = ReaderImageCache(directory: directory) { request in
+        let cache = ReaderImageCache(directory: directory, fetchData: { request in
             XCTAssertTrue([
                 URL(string: "https://example.com/images/photo.png")!,
                 URL(string: "https://example.com/images/photo-small.png")!
@@ -77,7 +77,7 @@ final class BookmarkedTests: XCTestCase {
                 headerFields: ["Content-Type": "image/png"]
             )!
             return (Data([0x89, 0x50, 0x4E, 0x47]), response)
-        }
+        })
 
         let html = #"<article><img src="/images/photo.png" srcset="/images/photo-small.png 1x, /images/photo.png 2x" alt="Local"><a href="/images/photo.png">open</a></article>"#
         let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
@@ -100,6 +100,19 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertTrue(cache.hasRemoteImages(in: #"<img src="/image.png">"#, pageURL: pageURL))
         XCTAssertFalse(cache.hasRemoteImages(in: #"<img src="file:///tmp/image.png">"#, pageURL: pageURL))
         XCTAssertFalse(cache.hasRemoteImages(in: #"<a href="/image.png">open</a>"#, pageURL: pageURL))
+    }
+
+    func testReaderImageCacheCanBeDisabled() async {
+        let cache = ReaderImageCache(isEnabled: { false }) { _ in
+            XCTFail("Disabled cache should not fetch images")
+            throw URLError(.cancelled)
+        }
+        let pageURL = URL(string: "https://example.com/posts/a")!
+        let html = #"<article><img src="/images/photo.png"></article>"#
+
+        let rewritten = await cache.localizingImages(in: html, pageURL: pageURL)
+        XCTAssertEqual(rewritten, html)
+        XCTAssertFalse(cache.hasRemoteImages(in: html, pageURL: pageURL))
     }
 
     func testReaderFontPreferencesBuildEscapedCSSFamilies() {

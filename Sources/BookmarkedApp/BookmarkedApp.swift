@@ -1,11 +1,13 @@
 import SwiftUI
 import AppKit
+import Combine
 import BookmarkedClient
 
 @main
 struct BookmarkedApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var store = BookmarkStore.shared
+    @StateObject private var settings = BookmarkedSettings.shared
 
     var body: some Scene {
         MenuBarExtra {
@@ -19,7 +21,10 @@ struct BookmarkedApp: App {
                 Button("Save Reader Edits") {
                     saveReaderEditAction?()
                 }
-                .keyboardShortcut("s", modifiers: .command)
+                .keyboardShortcut(
+                    settings.shortcut(for: .saveReaderEdits).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .saveReaderEdits).modifiers.eventModifiers
+                )
                 .disabled(saveReaderEditAction == nil)
             }
 
@@ -27,7 +32,10 @@ struct BookmarkedApp: App {
                 Button("Toggle Sidebar") {
                     toggleSidebarAction?()
                 }
-                .keyboardShortcut("b", modifiers: .command)
+                .keyboardShortcut(
+                    settings.shortcut(for: .toggleSidebar).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .toggleSidebar).modifiers.eventModifiers
+                )
 
                 Button("Toggle Compact Header") {
                     NotificationCenter.default.post(name: .bookmarkedToggleCompactDetailHeader, object: nil)
@@ -38,48 +46,69 @@ struct BookmarkedApp: App {
                 Button("Previous Bookmark") {
                     NotificationCenter.default.post(name: .bookmarkedSelectPreviousItem, object: nil)
                 }
-                .keyboardShortcut("k", modifiers: .control)
+                .keyboardShortcut(
+                    settings.shortcut(for: .previousBookmark).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .previousBookmark).modifiers.eventModifiers
+                )
 
                 Button("Next Bookmark") {
                     NotificationCenter.default.post(name: .bookmarkedSelectNextItem, object: nil)
                 }
-                .keyboardShortcut("j", modifiers: .control)
+                .keyboardShortcut(
+                    settings.shortcut(for: .nextBookmark).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .nextBookmark).modifiers.eventModifiers
+                )
 
                 Divider()
 
                 Button("Previous Tab") {
                     NotificationCenter.default.post(name: .bookmarkedSelectPreviousPreviewTab, object: nil)
                 }
-                .keyboardShortcut(",", modifiers: .control)
+                .keyboardShortcut(
+                    settings.shortcut(for: .previousPreviewTab).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .previousPreviewTab).modifiers.eventModifiers
+                )
 
                 Button("Next Tab") {
                     NotificationCenter.default.post(name: .bookmarkedSelectNextPreviewTab, object: nil)
                 }
-                .keyboardShortcut(".", modifiers: .control)
+                .keyboardShortcut(
+                    settings.shortcut(for: .nextPreviewTab).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .nextPreviewTab).modifiers.eventModifiers
+                )
 
                 Divider()
 
                 Button("Increase Font Size") {
                     increaseReaderFontAction?()
                 }
-                .keyboardShortcut("+", modifiers: .command)
+                .keyboardShortcut(
+                    settings.shortcut(for: .increaseFontSize).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .increaseFontSize).modifiers.eventModifiers
+                )
 
                 Button("Decrease Font Size") {
                     decreaseReaderFontAction?()
                 }
-                .keyboardShortcut("-", modifiers: .command)
+                .keyboardShortcut(
+                    settings.shortcut(for: .decreaseFontSize).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .decreaseFontSize).modifiers.eventModifiers
+                )
 
                 Divider()
 
-                Button("Reader Settings...") {
-                    ReaderSettingsWindowController.shared.show()
+                Button("Settings...") {
+                    SettingsWindowController.shared.show()
                 }
-                .keyboardShortcut(",", modifiers: .command)
+                .keyboardShortcut(
+                    settings.shortcut(for: .openSettings).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .openSettings).modifiers.eventModifiers
+                )
             }
         }
 
         Settings {
-            ReaderSettingsView()
+            GlobalSettingsView(settings: settings)
         }
     }
 
@@ -127,8 +156,8 @@ extension FocusedValues {
     }
 }
 
-final class ReaderSettingsWindowController {
-    static let shared = ReaderSettingsWindowController()
+final class SettingsWindowController {
+    static let shared = SettingsWindowController()
 
     private var window: NSWindow?
 
@@ -144,12 +173,12 @@ final class ReaderSettingsWindowController {
 
     @MainActor
     private func makeWindow() -> NSWindow {
-        let controller = NSHostingController(rootView: ReaderSettingsView())
+        let controller = NSHostingController(rootView: GlobalSettingsView(settings: .shared))
         let window = NSWindow(contentViewController: controller)
-        window.title = "Reader Settings"
+        window.title = "Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 360, height: 390))
+        window.setContentSize(NSSize(width: 620, height: 520))
         window.center()
         return window
     }
@@ -158,6 +187,7 @@ final class ReaderSettingsWindowController {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager: HotKeyManager?
     private var broker: BookmarkedBroker?
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -175,7 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 BookmarkStore.shared.captureFrontmostContext(openWindowAfterCapture: false)
             }
         }
-        hotKeyManager?.register()
+        registerCaptureHotKey()
+        BookmarkedSettings.shared.$shortcutOverrides
+            .sink { [weak self] _ in
+                self?.registerCaptureHotKey()
+            }
+            .store(in: &cancellables)
 
         DispatchQueue.main.async {
             MainWindowController.shared.show()
@@ -185,6 +220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MainWindowController.shared.show()
         return true
+    }
+
+    @MainActor
+    private func registerCaptureHotKey() {
+        let shortcut = BookmarkedSettings.shared.shortcut(for: .captureCurrentPage)
+        hotKeyManager?.register(shortcut: shortcut)
     }
 }
 

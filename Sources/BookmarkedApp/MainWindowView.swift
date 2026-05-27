@@ -9,10 +9,13 @@ extension Notification.Name {
     static let bookmarkedSelectPreviousPreviewTab = Notification.Name("BookmarkedSelectPreviousPreviewTab")
     static let bookmarkedSelectNextPreviewTab = Notification.Name("BookmarkedSelectNextPreviewTab")
     static let bookmarkedToggleCompactDetailHeader = Notification.Name("BookmarkedToggleCompactDetailHeader")
+    static let bookmarkedToggleSidebar = Notification.Name("BookmarkedToggleSidebar")
     static let bookmarkedToggleSearchFocus = Notification.Name("BookmarkedToggleSearchFocus")
     static let bookmarkedScrollPostUp = Notification.Name("BookmarkedScrollPostUp")
     static let bookmarkedScrollPostDown = Notification.Name("BookmarkedScrollPostDown")
     static let bookmarkedAdjustPreviewFontSize = Notification.Name("BookmarkedAdjustPreviewFontSize")
+    static let bookmarkedSaveReaderEdits = Notification.Name("BookmarkedSaveReaderEdits")
+    static let bookmarkedFocusNoteEditor = Notification.Name("BookmarkedFocusNoteEditor")
 }
 
 private enum MainWindowFocusField: Hashable {
@@ -70,9 +73,7 @@ struct MainWindowView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .focusedSceneValue(\.toggleSidebarAction) {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                isSidebarVisible.toggle()
-            }
+            toggleSidebar()
         }
         .focusedSceneValue(\.increaseReaderFontAction) {
             NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": 1.0])
@@ -99,6 +100,9 @@ struct MainWindowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleSearchFocus)) { _ in
             toggleSearchFocus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleSidebar)) { _ in
+            toggleSidebar()
         }
     }
 
@@ -228,6 +232,12 @@ struct MainWindowView: View {
         }
     }
 
+    private func toggleSidebar() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isSidebarVisible.toggle()
+        }
+    }
+
 }
 
 struct FullScreenReaderView: View {
@@ -296,6 +306,9 @@ struct FullScreenReaderView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedAdjustPreviewFontSize)) { notification in
             adjustFontScale(delta: fontScaleDelta(from: notification))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedFocusNoteEditor)) { _ in
+            focusNoteEditor()
         }
     }
 
@@ -409,6 +422,10 @@ struct EditableReaderView: View {
             isEditingHTML = false
             draftText = editableSource
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSaveReaderEdits)) { _ in
+            guard isEditing else { return }
+            save()
+        }
     }
 
     private var saveAction: (() -> Void)? {
@@ -446,7 +463,7 @@ struct EditableReaderView: View {
             HStack(spacing: 10) {
                 Text(isEditingHTML ? "Editing Reader HTML" : "Editing Reader Text")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Command-S saves")
+                Text("\(BookmarkedSettings.shared.shortcut(for: .saveReaderEdits).displayText) saves")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -844,6 +861,9 @@ struct BookmarkDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedAdjustPreviewFontSize)) { notification in
             adjustFontScale(delta: fontScaleDelta(from: notification))
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bookmarkedFocusNoteEditor)) { _ in
+            focusNoteEditor()
+        }
     }
 
     @ViewBuilder
@@ -1150,7 +1170,230 @@ private struct ResizableSidebarDivider: View {
     }
 }
 
-struct ReaderSettingsView: View {
+struct GlobalSettingsView: View {
+    @ObservedObject var settings: BookmarkedSettings
+
+    var body: some View {
+        TabView {
+            ShortcutsSettingsPane(settings: settings)
+                .tabItem {
+                    Label("Shortcuts", systemImage: "keyboard")
+                }
+
+            ImagesSettingsPane(settings: settings)
+                .tabItem {
+                    Label("Images", systemImage: "photo")
+                }
+
+            FontSettingsPane()
+                .tabItem {
+                    Label("Fonts", systemImage: "textformat")
+                }
+        }
+        .frame(width: 620, height: 520)
+        .padding(10)
+    }
+}
+
+private struct ShortcutsSettingsPane: View {
+    @ObservedObject var settings: BookmarkedSettings
+    @State private var recordingAction: BookmarkedShortcutAction?
+
+    private var groupedActions: [(String, [BookmarkedShortcutAction])] {
+        let grouped = Dictionary(grouping: BookmarkedShortcutAction.allCases, by: \.groupTitle)
+        return ["Global", "Window", "Navigation", "Reader"].compactMap { title in
+            guard let actions = grouped[title] else { return nil }
+            return (title, actions)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(groupedActions, id: \.0) { group in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(group.0)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 0) {
+                            ForEach(group.1) { action in
+                                ShortcutSettingsRow(
+                                    action: action,
+                                    shortcut: settings.shortcut(for: action),
+                                    isOverridden: settings.isOverridden(action),
+                                    conflicts: settings.conflictingActions(for: action),
+                                    onRecord: { recordingAction = action },
+                                    onReset: { settings.resetShortcut(for: action) }
+                                )
+                                if action != group.1.last {
+                                    Divider().padding(.leading, 148)
+                                }
+                            }
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        )
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .sheet(item: $recordingAction) { action in
+            ShortcutCaptureSheet(action: action, settings: settings)
+        }
+    }
+}
+
+private struct ShortcutSettingsRow: View {
+    let action: BookmarkedShortcutAction
+    let shortcut: BookmarkedKeyboardShortcut
+    let isOverridden: Bool
+    let conflicts: [BookmarkedShortcutAction]
+    let onRecord: () -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(action.title)
+                    .font(.system(size: 13, weight: .medium))
+                if !conflicts.isEmpty {
+                    Text("Also used by \(conflicts.map(\.title).joined(separator: ", "))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                } else if isOverridden {
+                    Text("Overridden")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Text(shortcut.displayText)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 8)
+                .frame(minWidth: 74, minHeight: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+
+            Button("Change", action: onRecord)
+                .controlSize(.small)
+
+            Button("Reset", action: onReset)
+                .controlSize(.small)
+                .disabled(!isOverridden)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+}
+
+private struct ShortcutCaptureSheet: View {
+    let action: BookmarkedShortcutAction
+    @ObservedObject var settings: BookmarkedSettings
+    @Environment(\.dismiss) private var dismiss
+    @State private var preview: BookmarkedKeyboardShortcut?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "keyboard")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text(action.title)
+                .font(.system(size: 15, weight: .semibold))
+            Text(preview?.displayText ?? "Press the new shortcut")
+                .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                .frame(minWidth: 180, minHeight: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                )
+
+            ShortcutCaptureView { shortcut in
+                preview = shortcut
+                settings.setShortcut(shortcut, for: action)
+                dismiss()
+            }
+            .frame(width: 1, height: 1)
+
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                Button("Reset to Default") {
+                    settings.resetShortcut(for: action)
+                    dismiss()
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 340)
+    }
+}
+
+private struct ShortcutCaptureView: NSViewRepresentable {
+    let onCapture: (BookmarkedKeyboardShortcut) -> Void
+
+    func makeNSView(context: Context) -> CaptureNSView {
+        CaptureNSView(onCapture: onCapture)
+    }
+
+    func updateNSView(_ nsView: CaptureNSView, context: Context) {
+        nsView.onCapture = onCapture
+        DispatchQueue.main.async {
+            nsView.window?.makeFirstResponder(nsView)
+        }
+    }
+
+    final class CaptureNSView: NSView {
+        var onCapture: (BookmarkedKeyboardShortcut) -> Void
+
+        init(onCapture: @escaping (BookmarkedKeyboardShortcut) -> Void) {
+            self.onCapture = onCapture
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.makeFirstResponder(self)
+        }
+
+        override func keyDown(with event: NSEvent) {
+            guard let shortcut = BookmarkedKeyboardShortcut.from(event: event) else { return }
+            onCapture(shortcut)
+        }
+    }
+}
+
+private struct ImagesSettingsPane: View {
+    @ObservedObject var settings: BookmarkedSettings
+
+    var body: some View {
+        Form {
+            Toggle("Cache reader images locally", isOn: $settings.cacheReaderImages)
+            Text("When enabled, newly indexed reader pages copy article images into Application Support so the Reader view keeps working when remote images change or disappear.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .formStyle(.grouped)
+        .padding(20)
+    }
+}
+
+private struct FontSettingsPane: View {
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
     @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
@@ -1171,7 +1414,7 @@ struct ReaderSettingsView: View {
             sansFontName: $readerSansFontName,
             monoFontName: $readerMonoFontName
         )
-        .frame(width: 360, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(18)
     }
 }

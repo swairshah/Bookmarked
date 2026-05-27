@@ -68,7 +68,7 @@ private final class BookmarkedWindow: NSWindow {
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown,
-           handleSearchFocusToggleKey(event) || handleCompactHeaderToggleKey(event) || handlePostScrollKey(event) {
+           handleConfiguredShortcut(event) {
             return
         }
 
@@ -82,40 +82,47 @@ private final class BookmarkedWindow: NSWindow {
         super.sendEvent(event)
     }
 
-    private func handleSearchFocusToggleKey(_ event: NSEvent) -> Bool {
-        let meaningfulModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard meaningfulModifiers == .control else { return false }
-        guard event.keyCode == UInt16(kVK_ANSI_F) else { return false }
+    private func handleConfiguredShortcut(_ event: NSEvent) -> Bool {
+        guard let action = BookmarkedSettings.shared.action(matching: event) else { return false }
 
-        NotificationCenter.default.post(name: .bookmarkedToggleSearchFocus, object: nil)
-        return true
-    }
-
-    private func handleCompactHeaderToggleKey(_ event: NSEvent) -> Bool {
-        let meaningfulModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard meaningfulModifiers == .control else { return false }
-        guard event.keyCode == UInt16(kVK_ANSI_M) else { return false }
-        guard !isEditingText(in: firstResponder) else { return false }
-
-        NotificationCenter.default.post(name: .bookmarkedToggleCompactDetailHeader, object: nil)
-        return true
-    }
-
-    private func handlePostScrollKey(_ event: NSEvent) -> Bool {
-        let meaningfulModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard meaningfulModifiers.isEmpty else { return false }
-        guard !isEditingText(in: firstResponder) else { return false }
-
-        switch event.charactersIgnoringModifiers {
-        case "j":
-            NotificationCenter.default.post(name: .bookmarkedScrollPostDown, object: nil)
-            return true
-        case "k":
+        switch action {
+        case .captureCurrentPage:
+            BookmarkStore.shared.captureFrontmostContext(openWindowAfterCapture: false)
+        case .openSettings:
+            SettingsWindowController.shared.show()
+        case .saveReaderEdits:
+            NotificationCenter.default.post(name: .bookmarkedSaveReaderEdits, object: nil)
+        case .toggleSidebar:
+            NotificationCenter.default.post(name: .bookmarkedToggleSidebar, object: nil)
+        case .focusSearch:
+            NotificationCenter.default.post(name: .bookmarkedToggleSearchFocus, object: nil)
+        case .toggleCompactHeader:
+            guard !isEditingText(in: firstResponder) else { return false }
+            NotificationCenter.default.post(name: .bookmarkedToggleCompactDetailHeader, object: nil)
+        case .previousBookmark:
+            NotificationCenter.default.post(name: .bookmarkedSelectPreviousItem, object: nil)
+        case .nextBookmark:
+            NotificationCenter.default.post(name: .bookmarkedSelectNextItem, object: nil)
+        case .previousPreviewTab:
+            NotificationCenter.default.post(name: .bookmarkedSelectPreviousPreviewTab, object: nil)
+        case .nextPreviewTab:
+            NotificationCenter.default.post(name: .bookmarkedSelectNextPreviewTab, object: nil)
+        case .increaseFontSize:
+            NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": 1.0])
+        case .decreaseFontSize:
+            NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": -1.0])
+        case .scrollPostUp:
+            guard !isEditingText(in: firstResponder) else { return false }
             NotificationCenter.default.post(name: .bookmarkedScrollPostUp, object: nil)
-            return true
-        default:
-            return false
+        case .scrollPostDown:
+            guard !isEditingText(in: firstResponder) else { return false }
+            NotificationCenter.default.post(name: .bookmarkedScrollPostDown, object: nil)
+        case .editNotes:
+            guard !isEditingText(in: firstResponder) else { return false }
+            NotificationCenter.default.post(name: .bookmarkedFocusNoteEditor, object: nil)
         }
+
+        return true
     }
 
     private func isEditingText(in responder: NSResponder?) -> Bool {

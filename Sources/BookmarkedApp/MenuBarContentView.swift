@@ -97,12 +97,12 @@ struct MenuBarContentView: View {
             Spacer()
 
             Button {
-                ReaderSettingsWindowController.shared.show()
+                SettingsWindowController.shared.show()
             } label: {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .help("Reader settings")
+            .help("Settings")
 
             Button {
                 NSApp.terminate(nil)
