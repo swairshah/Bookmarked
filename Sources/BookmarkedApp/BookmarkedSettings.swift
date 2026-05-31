@@ -6,6 +6,8 @@ import SwiftUI
 enum BookmarkedPreferenceKeys {
     static let shortcuts = "shortcutOverrides"
     static let cacheReaderImages = "cacheReaderImages"
+    static let cacheWebPages = "cacheWebPages"
+    static let cacheWebPagesDefaultMigrated = "cacheWebPagesDefaultMigrated"
 }
 
 enum BookmarkedShortcutAction: String, CaseIterable, Identifiable {
@@ -232,13 +234,29 @@ final class BookmarkedSettings: ObservableObject {
             UserDefaults.standard.set(cacheReaderImages, forKey: BookmarkedPreferenceKeys.cacheReaderImages)
         }
     }
+    @Published var cacheWebPages: Bool {
+        didSet {
+            UserDefaults.standard.set(cacheWebPages, forKey: BookmarkedPreferenceKeys.cacheWebPages)
+        }
+    }
 
     private init() {
+        let defaults = UserDefaults.standard
         shortcutOverrides = Self.loadShortcutOverrides()
-        if let value = UserDefaults.standard.object(forKey: BookmarkedPreferenceKeys.cacheReaderImages) as? Bool {
+        if let value = defaults.object(forKey: BookmarkedPreferenceKeys.cacheReaderImages) as? Bool {
             cacheReaderImages = value
         } else {
             cacheReaderImages = true
+        }
+
+        if defaults.bool(forKey: BookmarkedPreferenceKeys.cacheWebPagesDefaultMigrated) == false {
+            cacheWebPages = true
+            defaults.set(true, forKey: BookmarkedPreferenceKeys.cacheWebPages)
+            defaults.set(true, forKey: BookmarkedPreferenceKeys.cacheWebPagesDefaultMigrated)
+        } else if let value = defaults.object(forKey: BookmarkedPreferenceKeys.cacheWebPages) as? Bool {
+            cacheWebPages = value
+        } else {
+            cacheWebPages = true
         }
     }
 
@@ -301,6 +319,13 @@ final class BookmarkedSettings: ObservableObject {
 enum BookmarkedRuntimePreferences {
     static var cacheReaderImages: Bool {
         if let value = UserDefaults.standard.object(forKey: BookmarkedPreferenceKeys.cacheReaderImages) as? Bool {
+            return value
+        }
+        return true
+    }
+
+    static var cacheWebPages: Bool {
+        if let value = UserDefaults.standard.object(forKey: BookmarkedPreferenceKeys.cacheWebPages) as? Bool {
             return value
         }
         return true

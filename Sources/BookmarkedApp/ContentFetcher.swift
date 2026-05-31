@@ -24,10 +24,12 @@ enum ContentFetcher {
 
         if mime.contains("text/html") || text.localizedCaseInsensitiveContains("<html") {
             let pageURL = response.url ?? url
+            async let cachedPage = WebPageCache.shared.store(html: text, pageURL: pageURL, cacheURL: url)
             var content = HTMLContentExtractor.extract(from: text, url: pageURL)
             if let html = content.html {
                 content.html = await ReaderImageCache.shared.localizingImages(in: html, pageURL: pageURL)
             }
+            _ = await cachedPage
             return content
         }
 
@@ -92,7 +94,9 @@ struct ReaderImageCache: Sendable {
         }
 
         guard !localURLs.isEmpty else { return html }
-        return html.replacingMediaResourceURLs(baseURL: pageURL, localURLs: localURLs)
+        return html
+            .replacingMediaResourceURLs(baseURL: pageURL, localURLs: localURLs)
+            .preparedForLocalMediaDisplay()
     }
 
     func hasRemoteImages(in html: String, pageURL: URL) -> Bool {
@@ -133,6 +137,10 @@ struct ReaderImageCache: Sendable {
     }
 
     private static func defaultDirectory() -> URL {
+        defaultDirectoryURL
+    }
+
+    static var defaultDirectoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("Bookmarked", isDirectory: true)
             .appendingPathComponent("ReaderImages", isDirectory: true)
@@ -162,20 +170,216 @@ struct ReaderImageCache: Sendable {
     }
 }
 
+struct WebPageCache: Sendable {
+    static let shared = WebPageCache()
+
+    private let directory: URL
+    private let fetchData: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private let isEnabled: @Sendable () -> Bool
+
+    var readAccessDirectory: URL {
+        directory
+    }
+
+    init(
+        directory: URL = WebPageCache.defaultDirectoryURL,
+        isEnabled: @escaping @Sendable () -> Bool = { BookmarkedRuntimePreferences.cacheWebPages },
+        fetchData: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+            try await URLSession.shared.data(for: request)
+        }
+    ) {
+        self.directory = directory
+        self.isEnabled = isEnabled
+        self.fetchData = fetchData
+    }
+
+    func cachedPageURL(for url: URL) -> URL? {
+        let fileURL = pageFileURL(for: url)
+        return FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
+    }
+
+    func cache(url: URL) async -> URL? {
+        guard isEnabled(), url.scheme == "http" || url.scheme == "https" else { return nil }
+        if let cached = cachedPageURL(for: url) {
+            return cached
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 18
+        request.setValue("Bookmarked/0.1 (+macOS web page cache)", forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await fetchData(request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), !data.isEmpty else {
+                return nil
+            }
+
+            let mime = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+            let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+            guard mime.contains("text/html") || text.localizedCaseInsensitiveContains("<html") else {
+                return nil
+            }
+
+            let pageURL = response.url ?? url
+            return await store(html: text, pageURL: pageURL, cacheURL: url)
+        } catch {
+            return nil
+        }
+    }
+
+    func store(html: String, pageURL: URL, cacheURL: URL) async -> URL? {
+        guard isEnabled(), cacheURL.scheme == "http" || cacheURL.scheme == "https" else { return nil }
+
+        do {
+            try FileManager.default.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+            let absoluteHTML = html.normalizedResourceURLs(baseURL: pageURL)
+            let localizedHTML = await localizingMediaResources(in: absoluteHTML, pageURL: pageURL)
+                .preparedForLocalMediaDisplay()
+            let fileURL = pageFileURL(for: cacheURL)
+            guard let cachedData = localizedHTML.data(using: .utf8) else { return nil }
+            try cachedData.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
+    static var defaultDirectoryURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("Bookmarked", isDirectory: true)
+            .appendingPathComponent("WebPages", isDirectory: true)
+    }
+
+    private var assetsDirectory: URL {
+        directory.appendingPathComponent("Assets", isDirectory: true)
+    }
+
+    private func pageFileURL(for url: URL) -> URL {
+        directory.appendingPathComponent(Self.cacheKey(for: url)).appendingPathExtension("html")
+    }
+
+    private func localizingMediaResources(in html: String, pageURL: URL) async -> String {
+        let remoteURLs = Array(html.mediaResourceURLs(baseURL: pageURL).prefix(80))
+        guard !remoteURLs.isEmpty else { return html }
+
+        var localURLs: [URL: URL] = [:]
+        await withTaskGroup(of: (URL, URL?).self) { group in
+            for remoteURL in remoteURLs {
+                group.addTask {
+                    (remoteURL, await cacheMediaResource(from: remoteURL))
+                }
+            }
+            for await (remoteURL, localURL) in group {
+                guard let localURL else { continue }
+                localURLs[remoteURL] = localURL
+            }
+        }
+
+        guard !localURLs.isEmpty else { return html }
+        return html
+            .replacingMediaResourceURLs(baseURL: pageURL, localURLs: localURLs)
+            .preparedForLocalMediaDisplay()
+    }
+
+    private func cacheMediaResource(from url: URL) async -> URL? {
+        guard url.scheme == "http" || url.scheme == "https" else { return nil }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        request.setValue("Bookmarked/0.1 (+macOS web page cache)", forHTTPHeaderField: "User-Agent")
+        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await fetchData(request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), !data.isEmpty else {
+                return nil
+            }
+
+            let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+            guard contentType.contains("image/") || isLikelyImageURL(url) else { return nil }
+
+            let fileURL = assetsDirectory
+                .appendingPathComponent(Self.cacheKey(for: url))
+                .appendingPathExtension(Self.fileExtension(for: url, contentType: contentType))
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
+    private static func cacheKey(for url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func fileExtension(for url: URL, contentType: String) -> String {
+        switch contentType.split(separator: ";").first?.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "image/jpeg", "image/jpg": return "jpg"
+        case "image/png": return "png"
+        case "image/gif": return "gif"
+        case "image/webp": return "webp"
+        case "image/avif": return "avif"
+        case "image/svg+xml": return "svg"
+        default:
+            let ext = url.pathExtension.lowercased()
+            return ext.isEmpty ? "asset" : ext
+        }
+    }
+
+    private func isLikelyImageURL(_ url: URL) -> Bool {
+        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].contains(url.pathExtension.lowercased())
+    }
+}
+
+struct CacheStorageSnapshot: Equatable {
+    var readerImageBytes: Int64
+    var webPageBytes: Int64
+
+    var totalBytes: Int64 {
+        readerImageBytes + webPageBytes
+    }
+}
+
+enum BookmarkedCacheStorage {
+    static func snapshot() -> CacheStorageSnapshot {
+        CacheStorageSnapshot(
+            readerImageBytes: directorySize(ReaderImageCache.defaultDirectoryURL),
+            webPageBytes: directorySize(WebPageCache.defaultDirectoryURL)
+        )
+    }
+
+    private static func directorySize(_ url: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true else {
+                continue
+            }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
+    }
+}
+
 enum HTMLContentExtractor {
     static func extract(from html: String, url: URL) -> FetchedContent {
         let contentHTML = primaryContentHTML(from: html)
-        let readerHTML = contentHTML
-            .removingMatches("<script[\\s\\S]*?</script>")
-            .removingMatches("<style[\\s\\S]*?</style>")
-            .removingMatches("<noscript[\\s\\S]*?</noscript>")
-            .removingMatches("<!--([\\s\\S]*?)-->")
-            .removingMatches("<nav[\\s\\S]*?</nav>")
-            .removingMatches("<header[\\s\\S]*?</header>")
-            .removingMatches("<footer[\\s\\S]*?</footer>")
-            .removingMatches("<aside[\\s\\S]*?</aside>")
-            .normalizedResourceURLs(baseURL: url)
-
         let withoutNoise = contentHTML
             .removingMatches("<script[\\s\\S]*?</script>")
             .removingMatches("<style[\\s\\S]*?</style>")
@@ -185,6 +389,9 @@ enum HTMLContentExtractor {
             .removingMatches("<header[\\s\\S]*?</header>")
             .removingMatches("<footer[\\s\\S]*?</footer>")
             .removingMatches("<aside[\\s\\S]*?</aside>")
+
+        let readerHTML = (simplifiedFramerHTML(from: withoutNoise, fullHTML: html) ?? withoutNoise)
+            .normalizedResourceURLs(baseURL: url)
 
         let title = metaValue("og:title", in: html)
             ?? metaValue("twitter:title", in: html)
@@ -219,6 +426,171 @@ enum HTMLContentExtractor {
             ?? html
     }
 
+    private static func simplifiedFramerHTML(from contentHTML: String, fullHTML: String) -> String? {
+        guard fullHTML.localizedCaseInsensitiveContains("framer"),
+              contentHTML.localizedCaseInsensitiveContains("data-framer-component-type=\"RichTextContainer\"") else {
+            return nil
+        }
+
+        let desktopHiddenClasses = framerDesktopHiddenClasses(in: fullHTML)
+        let visibleHTML = contentHTML.removingDivBlocks(withAnyClass: desktopHiddenClasses)
+        let pattern = "(<div\\b(?=[^>]*data-framer-component-type=[\"']RichTextContainer[\"'])[^>]*>[\\s\\S]*?</div>)|(<img\\b[^>]*>)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return nil
+        }
+
+        var fragments: [FramerReaderFragment] = []
+        var seenText = Set<String>()
+        var seenImages = Set<String>()
+        let matches = regex.matches(in: visibleHTML, range: NSRange(visibleHTML.startIndex..<visibleHTML.endIndex, in: visibleHTML))
+        for match in matches {
+            if let richRange = Range(match.range(at: 1), in: visibleHTML) {
+                let raw = String(visibleHTML[richRange])
+                guard !raw.hasAnyClass(desktopHiddenClasses),
+                      let inner = firstCapture("<div\\b[^>]*>([\\s\\S]*?)</div>", in: raw) else {
+                    continue
+                }
+                let readable = inner.markdownStructuralText
+                    .removingMatches("<[^>]+>")
+                    .decodedHTMLEntities
+                    .normalizedWhitespace
+                guard readable.count > 2, seenText.insert(readable).inserted else { continue }
+                fragments.append(.text(html: inner.cleanedReaderFragment, readable: readable))
+            } else if let imageRange = Range(match.range(at: 2), in: visibleHTML) {
+                let raw = String(visibleHTML[imageRange])
+                guard let image = raw.readerImageFragment,
+                      let key = raw.imageIdentity,
+                      seenImages.insert(key).inserted else {
+                    continue
+                }
+                fragments.append(.image(html: image, identity: key))
+            }
+        }
+
+        let articleFragments = filteredFramerArticleFragments(fragments)
+        return articleFragments.count >= 3 ? articleFragments.map(\.html).joined(separator: "\n") : nil
+    }
+
+    private static func filteredFramerArticleFragments(_ fragments: [FramerReaderFragment]) -> [FramerReaderFragment] {
+        guard !fragments.isEmpty else { return [] }
+
+        let startIndex = fragments.firstIndex { fragment in
+            guard let readable = fragment.readable else { return false }
+            return readable.localizedCaseInsensitiveContains("Learning GSM8K is Inherently Low-Rank")
+        } ?? fragments.firstIndex { fragment in
+            (fragment.readable?.count ?? 0) >= 90
+        } ?? fragments.startIndex
+
+        let tail = fragments[startIndex...]
+        var endIndex = fragments.endIndex
+        var hasSeenArticleBody = false
+        for index in tail.indices {
+            guard let readable = fragments[index].readable else { continue }
+            if readable.localizedCaseInsensitiveContains("References") ||
+                readable.localizedCaseInsensitiveContains("Foot Notes") ||
+                readable.localizedCaseInsensitiveContains("Discussion") {
+                hasSeenArticleBody = true
+            }
+            if hasSeenArticleBody && isFramerFooterText(readable) {
+                endIndex = index
+                break
+            }
+        }
+
+        let articleSlice = Array(fragments[startIndex..<endIndex])
+        let readableTexts = articleSlice.compactMap(\.readable)
+        var acceptedText = Set<String>()
+
+        return articleSlice.compactMap { fragment in
+            guard let readable = fragment.readable else { return fragment }
+            guard !isFramerChromeText(readable) else { return nil }
+            if isContainedResponsiveText(readable, in: readableTexts) {
+                return nil
+            }
+            guard acceptedText.insert(readable).inserted else { return nil }
+            return fragment.headingAdjusted
+        }
+    }
+
+    private static func isContainedResponsiveText(_ text: String, in allTexts: [String]) -> Bool {
+        guard text.count < 90 else { return false }
+        let normalized = text.lowercased()
+        return allTexts.contains { other in
+            let candidate = other.lowercased()
+            return candidate.count > normalized.count + 24 && candidate.contains(normalized)
+        }
+    }
+
+    private static func isFramerFooterText(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return [
+            "blogs",
+            "schedule an intro",
+            "training reasoning models aligned with your goals.",
+            "email: founders@trainloop.ai",
+            "socials",
+            "legal"
+        ].contains(normalized)
+    }
+
+    private static func isFramerChromeText(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+        if isFramerFooterText(text) { return true }
+        if normalized == "blog" { return true }
+        if normalized.range(of: #"^\d+\.\d+$"#, options: .regularExpression) != nil { return true }
+        if ["linkedin", "x", "github", "yc (w25)", "privacy"].contains(normalized) { return true }
+        if normalized.contains("© 2026 trainloop") || normalized.contains("north beach, san francisco") { return true }
+        return false
+    }
+
+    private struct FramerReaderFragment {
+        var html: String
+        var readable: String?
+        var imageIdentity: String?
+
+        static func text(html: String, readable: String) -> Self {
+            Self(html: html, readable: readable, imageIdentity: nil)
+        }
+
+        static func image(html: String, identity: String) -> Self {
+            Self(html: html, readable: nil, imageIdentity: identity)
+        }
+
+        var headingAdjusted: Self {
+            guard let readable else { return self }
+            let headings = [
+                "Introduction",
+                "Training Details",
+                "Findings",
+                "Discussion Open Questions",
+                "Foot Notes",
+                "References"
+            ]
+            if readable == "Learning GSM8K is Inherently Low-Rank" {
+                return .text(html: "<h1>\(readable.escapedHTML)</h1>", readable: readable)
+            }
+            if headings.contains(readable) {
+                return .text(html: "<h2>\(readable.escapedHTML)</h2>", readable: readable)
+            }
+            return self
+        }
+    }
+
+    private static func framerDesktopHiddenClasses(in html: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(
+            pattern: "@media\\(min-width:\\s*1200px\\)\\{\\.([A-Za-z0-9_-]+)\\{display:none!important\\}\\}",
+            options: [.caseInsensitive]
+        ) else {
+            return []
+        }
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html))
+        return Set(matches.compactMap { match in
+            guard let range = Range(match.range(at: 1), in: html) else { return nil }
+            return String(html[range])
+        })
+    }
+
     private static func metaValue(_ name: String, in html: String) -> String? {
         let escaped = NSRegularExpression.escapedPattern(for: name)
         let patterns = [
@@ -248,7 +620,7 @@ enum HTMLContentExtractor {
     }
 }
 
-private extension String {
+extension String {
     func removingMatches(_ pattern: String) -> String {
         replacingOccurrences(of: pattern, with: " ", options: [.regularExpression, .caseInsensitive])
     }
@@ -312,6 +684,65 @@ private extension String {
         return value
     }
 
+    var escapedHTML: String {
+        replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    func hasAnyClass(_ classes: Set<String>) -> Bool {
+        guard !classes.isEmpty else { return false }
+        return !classAttributeTokens.isDisjoint(with: classes)
+    }
+
+    func removingDivBlocks(withAnyClass classes: Set<String>) -> String {
+        guard !classes.isEmpty else { return self }
+        var result = self
+        while let range = result.firstDivBlockRange(withAnyClass: classes) {
+            result.removeSubrange(range)
+        }
+        return result
+    }
+
+    var cleanedReaderFragment: String {
+        var value = self
+            .replacingOccurrences(of: "<span\\b[^>]*>", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "</span>", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "\\s(?:class|style|data-[A-Za-z0-9_-]+|dir|aria-[A-Za-z0-9_-]+)=(\"[^\"]*\"|'[^']*')", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "<br\\b[^>]*>", with: "<br>", options: [.regularExpression, .caseInsensitive])
+
+        value = value.replacingOccurrences(of: "<p\\s*>\\s*</p>", with: "", options: [.regularExpression, .caseInsensitive])
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var readerImageFragment: String? {
+        guard let src = attributeValue("src"),
+              isReadableContentImage else {
+            return nil
+        }
+
+        var attributes = [#"src="\#(src)""#]
+        if let srcset = attributeValue("srcset"), !srcset.isEmpty {
+            attributes.append(#"srcset="\#(srcset)""#)
+        }
+        if let sizes = attributeValue("sizes"), !sizes.isEmpty {
+            attributes.append(#"sizes="\#(sizes)""#)
+        }
+        if let alt = attributeValue("alt"), !alt.isEmpty {
+            attributes.append(#"alt="\#(alt)""#)
+        }
+        return "<figure><img \(attributes.joined(separator: " "))></figure>"
+    }
+
+    var imageIdentity: String? {
+        guard let raw = attributeValue("src") else { return nil }
+        guard var components = URLComponents(string: raw) else { return raw }
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? raw
+    }
+
     func normalizedResourceURLs(baseURL: URL) -> String {
         guard let regex = try? NSRegularExpression(pattern: "(href|src|poster)=[\"']([^\"']+)[\"']", options: [.caseInsensitive]) else {
             return self
@@ -365,6 +796,11 @@ private extension String {
         return result
     }
 
+    func preparedForLocalMediaDisplay() -> String {
+        removingPictureSources()
+            .removingSrcsetFromLocalMediaTags()
+    }
+
     private var mediaTags: [String] {
         mediaTagMatches.compactMap { match in
             guard let range = Range(match.range, in: self) else { return nil }
@@ -377,6 +813,36 @@ private extension String {
             return []
         }
         return regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+    }
+
+    private func removingPictureSources() -> String {
+        replacingOccurrences(of: "<source\\b[^>]*>", with: "", options: [.regularExpression, .caseInsensitive])
+    }
+
+    private func removingSrcsetFromLocalMediaTags() -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<(?:img|video|amp-img)\\b[^>]*\\bsrc=(\"file://[^\"]*\"|'file://[^']*')[^>]*>",
+            options: [.caseInsensitive]
+        ) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let tag = String(self[originalRange])
+                .replacingOccurrences(
+                    of: "\\s+srcset=(\"[^\"]*\"|'[^']*')",
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            result.replaceSubrange(tagRange, with: tag)
+        }
+        return result
     }
 
     private func mediaAttributeURLs(baseURL: URL) -> [URL] {
@@ -478,6 +944,72 @@ private extension String {
             return nil
         }
         return url
+    }
+
+    private var classAttributeTokens: Set<String> {
+        guard let classes = attributeValue("class") else { return [] }
+        return Set(classes.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" }).map(String.init))
+    }
+
+    private var isReadableContentImage: Bool {
+        guard let src = attributeValue("src"),
+              !src.localizedCaseInsensitiveContains("favicon"),
+              !src.localizedCaseInsensitiveContains("icon") else {
+            return false
+        }
+
+        let width = Int(attributeValue("width") ?? "") ?? 0
+        let height = Int(attributeValue("height") ?? "") ?? 0
+        if width > 0 || height > 0 {
+            return width >= 140 && height >= 80
+        }
+        return true
+    }
+
+    private func attributeValue(_ name: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\b\(escaped)=(\"([^\"]*)\"|'([^']*)')",
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range) else { return nil }
+        let valueRange = match.range(at: 2).location != NSNotFound ? match.range(at: 2) : match.range(at: 3)
+        guard let range = Range(valueRange, in: self) else { return nil }
+        return String(self[range]).decodedHTMLEntities
+    }
+
+    private func firstDivBlockRange(withAnyClass classes: Set<String>) -> Range<String.Index>? {
+        guard let regex = try? NSRegularExpression(pattern: "</?div\\b[^>]*>", options: [.caseInsensitive]) else {
+            return nil
+        }
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        var blockStart: String.Index?
+        var depth = 0
+
+        for match in matches {
+            guard let tagRange = Range(match.range, in: self) else { continue }
+            let tag = String(self[tagRange])
+            let isClosing = tag.lowercased().hasPrefix("</")
+
+            if let start = blockStart {
+                if isClosing {
+                    depth -= 1
+                    if depth == 0 {
+                        return start..<tagRange.upperBound
+                    }
+                } else {
+                    depth += 1
+                }
+            } else if !isClosing, tag.hasAnyClass(classes) {
+                blockStart = tagRange.lowerBound
+                depth = 1
+            }
+        }
+
+        return nil
     }
 
     private func replacingNumericHTMLEntities() -> String {

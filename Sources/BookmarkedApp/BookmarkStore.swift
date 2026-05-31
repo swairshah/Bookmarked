@@ -17,6 +17,7 @@ final class BookmarkStore: ObservableObject {
     private let ioQueue = DispatchQueue(label: "bookmarked.store.io", qos: .utility)
     private var saveWorkItem: DispatchWorkItem?
     private var imageLocalizationTasks = Set<UUID>()
+    private var webPageCacheTasks = Set<UUID>()
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -238,6 +239,12 @@ final class BookmarkStore: ObservableObject {
            ReaderImageCache.shared.hasRemoteImages(in: html, pageURL: url) {
             localizeReaderImages(for: item.id, html: html, pageURL: url)
         }
+
+        if BookmarkedRuntimePreferences.cacheWebPages,
+           let url = item.url,
+           item.kind == .webPage || item.kind == .githubRepo {
+            cacheWebPage(for: item.id, url: url)
+        }
     }
 
     func captureFrontmostContext(openWindowAfterCapture: Bool = false) {
@@ -300,8 +307,10 @@ final class BookmarkStore: ObservableObject {
                 items[idx].updatedAt = Date()
                 scheduleSave()
                 statusMessage = "Refreshed bookmark"
+                cacheWebPage(for: id, url: url)
             } else {
-                _ = add(draft)
+                let item = add(draft)
+                cacheWebPage(for: item.id, url: url)
             }
         } catch {
             let kind = BookmarkClassifier.classify(url: url)
@@ -337,6 +346,20 @@ final class BookmarkStore: ObservableObject {
                 self.items[idx].readerHTML = localizedHTML
                 self.items[idx].updatedAt = Date()
                 self.scheduleSave()
+            }
+        }
+    }
+
+    private func cacheWebPage(for itemID: UUID, url: URL) {
+        guard BookmarkedRuntimePreferences.cacheWebPages,
+              !webPageCacheTasks.contains(itemID) else {
+            return
+        }
+        webPageCacheTasks.insert(itemID)
+        Task {
+            _ = await WebPageCache.shared.cache(url: url)
+            await MainActor.run {
+                _ = self.webPageCacheTasks.remove(itemID)
             }
         }
     }

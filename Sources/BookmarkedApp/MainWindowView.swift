@@ -16,6 +16,8 @@ extension Notification.Name {
     static let bookmarkedAdjustPreviewFontSize = Notification.Name("BookmarkedAdjustPreviewFontSize")
     static let bookmarkedSaveReaderEdits = Notification.Name("BookmarkedSaveReaderEdits")
     static let bookmarkedFocusNoteEditor = Notification.Name("BookmarkedFocusNoteEditor")
+    static let bookmarkedNavigateWebBack = Notification.Name("BookmarkedNavigateWebBack")
+    static let bookmarkedNavigateWebForward = Notification.Name("BookmarkedNavigateWebForward")
 }
 
 private enum MainWindowFocusField: Hashable {
@@ -243,6 +245,7 @@ struct MainWindowView: View {
 struct FullScreenReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
+    @ObservedObject private var settings = BookmarkedSettings.shared
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var noteFocusToken = 0
     @State private var webFontScale = 1.0
@@ -325,7 +328,14 @@ struct FullScreenReaderView: View {
                 textReader
                     .opacity(previewMode == .reader ? 1 : 0)
                     .allowsHitTesting(previewMode == .reader)
-                WebPreview(url: url, fontScale: webFontScale)
+                WebPreview(
+                    url: url,
+                    title: item.title,
+                    fallbackHTML: item.readerHTML,
+                    fallbackText: item.contentText,
+                    fontScale: webFontScale,
+                    useCachedPage: settings.cacheWebPages
+                )
                     .opacity(previewMode == .web ? 1 : 0)
                     .allowsHitTesting(previewMode == .web)
             }
@@ -804,6 +814,7 @@ struct BookmarkRow: View {
 struct BookmarkDetailView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
+    @ObservedObject private var settings = BookmarkedSettings.shared
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var noteFocusToken = 0
     @State private var showingSettings = false
@@ -1059,7 +1070,14 @@ struct BookmarkDetailView: View {
             case .webPage, .githubRepo:
                 if let url = item.url {
                     if previewMode == .web {
-                        WebPreview(url: url, fontScale: webFontScale)
+                        WebPreview(
+                            url: url,
+                            title: item.title,
+                            fallbackHTML: item.readerHTML,
+                            fallbackText: item.contentText,
+                            fontScale: webFontScale,
+                            useCachedPage: settings.cacheWebPages
+                        )
                     } else {
                         textReader
                     }
@@ -1182,7 +1200,7 @@ struct GlobalSettingsView: View {
 
             ImagesSettingsPane(settings: settings)
                 .tabItem {
-                    Label("Images", systemImage: "photo")
+                    Label("Cache", systemImage: "internaldrive")
                 }
 
             FontSettingsPane()
@@ -1379,6 +1397,7 @@ private struct ShortcutCaptureView: NSViewRepresentable {
 
 private struct ImagesSettingsPane: View {
     @ObservedObject var settings: BookmarkedSettings
+    @State private var storageSnapshot = BookmarkedCacheStorage.snapshot()
 
     var body: some View {
         Form {
@@ -1387,10 +1406,58 @@ private struct ImagesSettingsPane: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Cache Web tab pages for offline reading", isOn: $settings.cacheWebPages)
+            Text("When enabled, Bookmarked saves a local copy of newly indexed web pages and uses that copy in the Web tab when available.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Section("Disk Usage") {
+                CacheUsageRow(title: "Reader images", bytes: storageSnapshot.readerImageBytes)
+                CacheUsageRow(title: "Web pages", bytes: storageSnapshot.webPageBytes)
+                CacheUsageRow(title: "Total cache", bytes: storageSnapshot.totalBytes, isEmphasized: true)
+
+                Button {
+                    storageSnapshot = BookmarkedCacheStorage.snapshot()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+            }
         }
         .formStyle(.grouped)
         .padding(20)
+        .onAppear {
+            storageSnapshot = BookmarkedCacheStorage.snapshot()
+        }
     }
+}
+
+private struct CacheUsageRow: View {
+    let title: String
+    let bytes: Int64
+    var isEmphasized = false
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13, weight: isEmphasized ? .semibold : .regular))
+            Spacer()
+            Text(Self.formatter.string(fromByteCount: bytes))
+                .font(.system(size: 13, weight: isEmphasized ? .semibold : .regular, design: .monospaced))
+                .foregroundStyle(isEmphasized ? .primary : .secondary)
+        }
+    }
+
+    private static let formatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter
+    }()
 }
 
 private struct FontSettingsPane: View {
@@ -1674,7 +1741,11 @@ struct FlowTags: View {
 
 struct WebPreview: NSViewRepresentable {
     let url: URL
+    let title: String
+    let fallbackHTML: String?
+    let fallbackText: String
     let fontScale: Double
+    let useCachedPage: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -1691,9 +1762,14 @@ struct WebPreview: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.webView = nsView
-        if nsView.url != url {
-            nsView.load(URLRequest(url: url))
-        }
+        context.coordinator.load(
+            url: url,
+            title: title,
+            fallbackHTML: fallbackHTML,
+            fallbackText: fallbackText,
+            useCachedPage: useCachedPage,
+            in: nsView
+        )
         let pageZoom = CGFloat(fontScale)
         if abs(nsView.pageZoom - pageZoom) > 0.001 {
             nsView.pageZoom = pageZoom
@@ -1703,6 +1779,11 @@ struct WebPreview: NSViewRepresentable {
     final class Coordinator {
         weak var webView: WKWebView?
         private var observers: [NSObjectProtocol] = []
+        private var loadingTask: Task<Void, Never>?
+        private var loadedRequest: LoadRequest?
+        private let fallbackDocumentURL = WebPageCache.defaultDirectoryURL
+            .appendingPathComponent("PreviewDocuments", isDirectory: true)
+            .appendingPathComponent("\(UUID().uuidString).html")
         private let step = 420
 
         init() {
@@ -1720,16 +1801,174 @@ struct WebPreview: NSViewRepresentable {
             ) { [weak self] _ in
                 self?.scroll(by: -1)
             })
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedNavigateWebBack,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.navigateBack()
+            })
+            observers.append(NotificationCenter.default.addObserver(
+                forName: .bookmarkedNavigateWebForward,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.navigateForward()
+            })
         }
 
         deinit {
+            loadingTask?.cancel()
+            try? FileManager.default.removeItem(at: fallbackDocumentURL)
             for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
             }
         }
 
+        func load(
+            url: URL,
+            title: String,
+            fallbackHTML: String?,
+            fallbackText: String,
+            useCachedPage: Bool,
+            in webView: WKWebView
+        ) {
+            let fallbackDocument = Self.fallbackDocument(title: title, html: fallbackHTML, text: fallbackText)
+            let request = LoadRequest(url: url, useCachedPage: useCachedPage, fallbackDocument: fallbackDocument)
+            guard loadedRequest != request else { return }
+            loadedRequest = request
+            loadingTask?.cancel()
+
+            if useCachedPage && Self.shouldLoadStaticCache(for: url) {
+                if let cachedURL = WebPageCache.shared.cachedPageURL(for: url),
+                   let staticDocument = Self.staticCachedDocument(from: cachedURL),
+                   let documentURL = writeFallbackDocument(staticDocument) {
+                    webView.loadFileURL(documentURL, allowingReadAccessTo: WebPageCache.shared.readAccessDirectory)
+                } else if let fallbackDocument,
+                          let documentURL = writeFallbackDocument(fallbackDocument) {
+                    webView.loadFileURL(documentURL, allowingReadAccessTo: WebPageCache.shared.readAccessDirectory)
+                    loadingTask = Task {
+                        _ = await WebPageCache.shared.cache(url: url)
+                    }
+                } else {
+                    webView.load(URLRequest(url: url))
+                    loadingTask = Task {
+                        _ = await WebPageCache.shared.cache(url: url)
+                    }
+                }
+                return
+            }
+
+            if useCachedPage {
+                if let cachedURL = WebPageCache.shared.cachedPageURL(for: url) {
+                    webView.loadFileURL(cachedURL, allowingReadAccessTo: WebPageCache.shared.readAccessDirectory)
+                } else if let fallbackDocument,
+                          let documentURL = writeFallbackDocument(fallbackDocument) {
+                    webView.loadFileURL(documentURL, allowingReadAccessTo: WebPageCache.shared.readAccessDirectory)
+                    loadingTask = Task {
+                        _ = await WebPageCache.shared.store(html: fallbackDocument, pageURL: url, cacheURL: url)
+                    }
+                } else {
+                    webView.load(URLRequest(url: url))
+                    loadingTask = Task {
+                        _ = await WebPageCache.shared.cache(url: url)
+                    }
+                }
+            } else {
+                webView.load(URLRequest(url: url))
+            }
+        }
+
+        private static func shouldLoadStaticCache(for url: URL) -> Bool {
+            guard let host = url.host?.lowercased() else { return false }
+            return host == "substack.com" || host.hasSuffix(".substack.com")
+        }
+
+        private static func staticCachedDocument(from url: URL) -> String? {
+            guard var html = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            html = html
+                .replacingOccurrences(of: "<script\\b[\\s\\S]*?</script>", with: "", options: [.regularExpression, .caseInsensitive])
+                .replacingOccurrences(of: "\\s(on[a-zA-Z]+)=(\"[^\"]*\"|'[^']*')", with: "", options: [.regularExpression])
+                .preparedForLocalMediaDisplay()
+            return html
+        }
+
         private func scroll(by direction: Int) {
             webView?.evaluateJavaScript("window.scrollBy({ top: \(step * direction), left: 0, behavior: 'smooth' });")
+        }
+
+        private func navigateBack() {
+            guard webView?.canGoBack == true else { return }
+            webView?.goBack()
+        }
+
+        private func navigateForward() {
+            guard webView?.canGoForward == true else { return }
+            webView?.goForward()
+        }
+
+        private func writeFallbackDocument(_ document: String) -> URL? {
+            do {
+                try FileManager.default.createDirectory(
+                    at: fallbackDocumentURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try document.write(to: fallbackDocumentURL, atomically: true, encoding: .utf8)
+                return fallbackDocumentURL
+            } catch {
+                return nil
+            }
+        }
+
+        private static func fallbackDocument(title: String, html: String?, text: String) -> String? {
+            let trimmedHTML = html?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedHTML.isEmpty || !trimmedText.isEmpty else { return nil }
+            let body = trimmedHTML.isEmpty ? "<pre>\(escape(trimmedText))</pre>" : trimmedHTML
+            return """
+            <!doctype html>
+            <html>
+            <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>\(escape(title))</title>
+            <style>
+            :root { color-scheme: light dark; }
+            body {
+              margin: 0;
+              background: Canvas;
+              color: CanvasText;
+              font: 17px/1.62 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+            }
+            main {
+              max-width: 820px;
+              margin: 0 auto;
+              padding: 38px 48px 80px;
+            }
+            h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 1.45em 0 0.45em; }
+            p, ul, ol, blockquote, pre, figure { margin: 0 0 1.05em; }
+            img, video { display: block; max-width: 100%; max-height: min(70vh, 560px); width: auto; height: auto; object-fit: contain; }
+            pre { white-space: pre-wrap; font: inherit; }
+            a { color: #2563eb; }
+            </style>
+            </head>
+            <body><main>\(body)</main></body>
+            </html>
+            """
+        }
+
+        private static func escape(_ text: String) -> String {
+            text
+                .replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+                .replacingOccurrences(of: "\"", with: "&quot;")
+        }
+
+        private struct LoadRequest: Equatable {
+            var url: URL
+            var useCachedPage: Bool
+            var fallbackDocument: String?
         }
     }
 }

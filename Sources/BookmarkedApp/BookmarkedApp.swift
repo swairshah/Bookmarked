@@ -79,6 +79,18 @@ struct BookmarkedApp: App {
 
                 Divider()
 
+                Button("Web Back") {
+                    NotificationCenter.default.post(name: .bookmarkedNavigateWebBack, object: nil)
+                }
+                .keyboardShortcut("[", modifiers: [.command])
+
+                Button("Web Forward") {
+                    NotificationCenter.default.post(name: .bookmarkedNavigateWebForward, object: nil)
+                }
+                .keyboardShortcut("]", modifiers: [.command])
+
+                Divider()
+
                 Button("Increase Font Size") {
                     increaseReaderFontAction?()
                 }

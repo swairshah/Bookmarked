@@ -26,6 +26,7 @@ struct ReaderHTMLView: NSViewRepresentable {
         context.coordinator.webView = nsView
         context.coordinator.onEditSource = onEditSource
         context.coordinator.onElementRemoved = onElementRemoved
+        let displayHTML = html.preparedForLocalMediaDisplay()
         let document = """
         <!doctype html>
         <html>
@@ -57,6 +58,15 @@ struct ReaderHTMLView: NSViewRepresentable {
         h2 { font-size: 1.45em; }
         h3 { font-size: 1.18em; }
         p, ul, ol, blockquote, pre, figure { margin: 0 0 1.05em; }
+        main * {
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+        main [style] {
+          position: static !important;
+          transform: none !important;
+          inset: auto !important;
+        }
         ul, ol { padding-left: 1.45em; }
         li { margin: 0.32em 0; }
         a { color: #2563eb; text-decoration-thickness: 0.08em; text-underline-offset: 0.16em; }
@@ -66,10 +76,11 @@ struct ReaderHTMLView: NSViewRepresentable {
           color: color-mix(in srgb, CanvasText 76%, transparent);
         }
         img, video {
+          display: block !important;
           max-width: 100%;
           max-height: min(70vh, 560px);
-          width: auto;
-          height: auto;
+          width: auto !important;
+          height: auto !important;
           object-fit: contain;
           border-radius: 8px;
         }
@@ -93,7 +104,7 @@ struct ReaderHTMLView: NSViewRepresentable {
         th, td { border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding: 0.45em 0.6em; text-align: left; }
         </style>
         </head>
-        <body><main>\(html)</main>
+        <body><main>\(displayHTML)</main>
         <script>
         (() => {
           const selector = "figure,picture,img,video,pre,blockquote,table,li,p,h1,h2,h3,h4,h5,h6,section,article";
