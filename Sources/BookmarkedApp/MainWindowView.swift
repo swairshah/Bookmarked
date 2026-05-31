@@ -28,6 +28,7 @@ private enum BookmarkPreviewMode: String, CaseIterable, Identifiable {
     case reader = "Reader"
     case notes = "Notes"
     case web = "Web"
+    case settings = "Settings"
 
     var id: String { rawValue }
 }
@@ -189,7 +190,15 @@ struct MainWindowView: View {
     @ViewBuilder
     private var detail: some View {
         if let selectedItem {
-            BookmarkDetailView(item: selectedItem, store: store)
+            BookmarkDetailView(
+                item: selectedItem,
+                store: store,
+                settingsTabRequestID: controller.settingsTabRequestID
+            )
+        } else if controller.settingsTabRequestID > 0 {
+            GlobalSettingsView(settings: BookmarkedSettings.shared, fillsAvailableSpace: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
         } else {
             VStack(spacing: 10) {
                 Image(systemName: "bookmark.slash")
@@ -814,10 +823,11 @@ struct BookmarkRow: View {
 struct BookmarkDetailView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
+    let settingsTabRequestID: Int
     @ObservedObject private var settings = BookmarkedSettings.shared
     @State private var previewMode: BookmarkPreviewMode = .reader
+    @State private var previousPreviewMode: BookmarkPreviewMode = .reader
     @State private var noteFocusToken = 0
-    @State private var showingSettings = false
     @State private var webFontScale = 1.0
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
     @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
@@ -854,9 +864,10 @@ struct BookmarkDetailView: View {
             Divider()
             preview
         }
-        .background(noteKeyboardShortcut)
+        .background(previewKeyboardShortcuts)
         .onChange(of: item.id) { _ in
             previewMode = .reader
+            previousPreviewMode = .reader
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousPreviewTab)) { _ in
             movePreviewTab(by: -1)
@@ -874,6 +885,9 @@ struct BookmarkDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedFocusNoteEditor)) { _ in
             focusNoteEditor()
+        }
+        .onChange(of: settingsTabRequestID) { _ in
+            openSettingsTab()
         }
     }
 
@@ -909,16 +923,14 @@ struct BookmarkDetailView: View {
             Spacer(minLength: 12)
 
             Button {
-                showingSettings.toggle()
+                openSettingsTab()
             } label: {
-                Image(systemName: "gearshape")
+                Image(systemName: previewMode == .settings ? "gearshape.fill" : "gearshape")
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(.borderless)
-            .help("Reader settings")
-            .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
-                readerSettingsPopover
-            }
+            .foregroundStyle(previewMode == .settings ? Color.accentColor : Color.primary)
+            .help("Settings")
 
             if previewModes.count > 1 {
                 Picker("", selection: $previewMode) {
@@ -998,17 +1010,15 @@ struct BookmarkDetailView: View {
                 .disabled(item.url == nil)
 
                 Button {
-                    showingSettings.toggle()
+                    openSettingsTab()
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: previewMode == .settings ? "gearshape.fill" : "gearshape")
                         .frame(width: 22, height: 22)
                 }
                 .frame(width: 54, height: 32)
                 .buttonStyle(.bordered)
-                .help("Reader settings")
-                .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
-                    readerSettingsPopover
-                }
+                .foregroundStyle(previewMode == .settings ? Color.accentColor : Color.primary)
+                .help("Settings")
             }
 
             if !item.tags.isEmpty {
@@ -1022,21 +1032,13 @@ struct BookmarkDetailView: View {
         }
     }
 
-    private var readerSettingsPopover: some View {
-        ReaderSettingsContent(
-            fontChoice: Binding(
-                get: { readerFontChoice },
-                set: { readerFontChoice = $0 }
-            ),
-            serifFontName: $readerSerifFontName,
-            sansFontName: $readerSansFontName,
-            monoFontName: $readerMonoFontName
-        )
-    }
-
     @ViewBuilder
     private var preview: some View {
-        if previewMode == .notes {
+        if previewMode == .settings {
+            GlobalSettingsView(settings: settings, fillsAvailableSpace: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
+        } else if previewMode == .notes {
             noteReader
         } else {
             switch item.kind {
@@ -1113,13 +1115,20 @@ struct BookmarkDetailView: View {
         )
     }
 
-    private var noteKeyboardShortcut: some View {
+    private var previewKeyboardShortcuts: some View {
         Group {
             if previewMode == .notes {
                 Button("") {
                     focusNoteEditor()
                 }
                 .keyboardShortcut(.return, modifiers: [])
+            }
+
+            if previewMode == .settings {
+                Button("") {
+                    closeSettingsTab()
+                }
+                .keyboardShortcut(.escape, modifiers: [])
             }
         }
         .buttonStyle(.plain)
@@ -1149,6 +1158,17 @@ struct BookmarkDetailView: View {
     private func focusNoteEditor() {
         previewMode = .notes
         noteFocusToken += 1
+    }
+
+    private func openSettingsTab() {
+        if previewMode != .settings {
+            previousPreviewMode = previewMode
+        }
+        previewMode = .settings
+    }
+
+    private func closeSettingsTab() {
+        previewMode = previewModes.contains(previousPreviewMode) ? previousPreviewMode : (previewModes.first ?? .reader)
     }
 }
 
@@ -1190,6 +1210,7 @@ private struct ResizableSidebarDivider: View {
 
 struct GlobalSettingsView: View {
     @ObservedObject var settings: BookmarkedSettings
+    var fillsAvailableSpace = false
 
     var body: some View {
         TabView {
@@ -1208,7 +1229,11 @@ struct GlobalSettingsView: View {
                     Label("Fonts", systemImage: "textformat")
                 }
         }
-        .frame(width: 620, height: 520)
+        .frame(width: fillsAvailableSpace ? nil : 620, height: fillsAvailableSpace ? nil : 520)
+        .frame(
+            maxWidth: fillsAvailableSpace ? .infinity : nil,
+            maxHeight: fillsAvailableSpace ? .infinity : nil
+        )
         .padding(10)
     }
 }
@@ -1472,83 +1497,42 @@ private struct FontSettingsPane: View {
     }
 
     var body: some View {
-        ReaderSettingsContent(
-            fontChoice: Binding(
-                get: { readerFontChoice },
-                set: { readerFontChoice = $0 }
-            ),
-            serifFontName: $readerSerifFontName,
-            sansFontName: $readerSansFontName,
-            monoFontName: $readerMonoFontName
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(18)
-    }
-}
-
-struct ReaderSettingsContent: View {
-    @Binding var fontChoice: ReaderFontChoice
-    @Binding var serifFontName: String
-    @Binding var sansFontName: String
-    @Binding var monoFontName: String
-
-    private var fontPreferences: ReaderFontPreferences {
-        ReaderFontPreferences(
-            serifName: serifFontName,
-            sansName: sansFontName,
-            monoName: monoFontName
-        )
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(.secondary)
-                Text("Reader Settings")
-                    .font(.system(size: 14, weight: .semibold))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Body Style")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Picker("", selection: $fontChoice) {
+        Form {
+            Section("Body Style") {
+                Picker("", selection: Binding(
+                    get: { readerFontChoice },
+                    set: { readerFontChoice = $0 }
+                )) {
                     ForEach(ReaderFontChoice.allCases) { choice in
                         Text(choice.rawValue).tag(choice)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 210)
+                .frame(width: 260)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
+            Section("Font Families") {
                 ReaderFontNameField(
                     title: "Serif",
-                    text: $serifFontName,
+                    text: $readerSerifFontName,
                     defaultName: ReaderFontPreferences.defaultSerifName
                 )
                 ReaderFontNameField(
                     title: "Sans",
-                    text: $sansFontName,
+                    text: $readerSansFontName,
                     defaultName: ReaderFontPreferences.defaultSansName
                 )
                 ReaderFontNameField(
                     title: "Mono",
-                    text: $monoFontName,
+                    text: $readerMonoFontName,
                     defaultName: ReaderFontPreferences.defaultMonoName
                 )
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Preview")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+            Section("Preview") {
                 Text("A reader paragraph with code")
-                    .font(fontChoice.swiftUIFont(preferences: fontPreferences))
+                    .font(readerFontChoice.swiftUIFont(preferences: fontPreferences))
                 Text("Headings use the sans font")
                     .font(fontPreferences.headingFont(level: 3).weight(.semibold))
                 Text("let mono = \"code\"")
@@ -1556,8 +1540,16 @@ struct ReaderSettingsContent: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .frame(width: 300, alignment: .leading)
+        .formStyle(.grouped)
+        .padding(20)
+    }
+
+    private var fontPreferences: ReaderFontPreferences {
+        ReaderFontPreferences(
+            serifName: readerSerifFontName,
+            sansName: readerSansFontName,
+            monoName: readerMonoFontName
+        )
     }
 }
 
@@ -1567,28 +1559,27 @@ private struct ReaderFontNameField: View {
     let defaultName: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .font(.system(size: 13, weight: .medium))
+
+                FontFamilyComboBox(
+                    text: $text,
+                    placeholder: defaultName,
+                    fontFamilies: ReaderFontPreferences.availableFontFamilyNames
+                )
+                .frame(minWidth: 240, maxWidth: 460)
+                .frame(height: 24)
+
                 Button("Reset") {
                     text = defaultName
                 }
-                .font(.system(size: 11))
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .controlSize(.small)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines) == defaultName)
             }
-
-            FontFamilyComboBox(
-                text: $text,
-                placeholder: defaultName,
-                fontFamilies: ReaderFontPreferences.availableFontFamilyNames
-            )
-            .frame(height: 24)
         }
+        .padding(.vertical, 4)
     }
 }
 

@@ -8,6 +8,7 @@ final class MainWindowController: ObservableObject {
 
     @Published var selection: UUID?
     @Published var isFullScreen = false
+    @Published private(set) var settingsTabRequestID = 0
 
     private var window: NSWindow?
     private var delegate: WindowDelegate?
@@ -61,6 +62,11 @@ final class MainWindowController: ObservableObject {
         guard let window else { return }
         window.zoom(nil)
     }
+
+    func showSettingsTab() {
+        show()
+        settingsTabRequestID += 1
+    }
 }
 
 private final class BookmarkedWindow: NSWindow {
@@ -89,7 +95,7 @@ private final class BookmarkedWindow: NSWindow {
         case .captureCurrentPage:
             BookmarkStore.shared.captureFrontmostContext(openWindowAfterCapture: false)
         case .openSettings:
-            SettingsWindowController.shared.show()
+            MainWindowController.shared.showSettingsTab()
         case .saveReaderEdits:
             NotificationCenter.default.post(name: .bookmarkedSaveReaderEdits, object: nil)
         case .toggleSidebar:

@@ -97,7 +97,7 @@ struct MenuBarContentView: View {
             Spacer()
 
             Button {
-                SettingsWindowController.shared.show()
+                MainWindowController.shared.showSettingsTab()
             } label: {
                 Image(systemName: "gearshape")
             }

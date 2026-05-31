@@ -17,6 +17,16 @@ struct BookmarkedApp: App {
         }
         .menuBarExtraStyle(.window)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    MainWindowController.shared.showSettingsTab()
+                }
+                .keyboardShortcut(
+                    settings.shortcut(for: .openSettings).keyEquivalentValue,
+                    modifiers: settings.shortcut(for: .openSettings).modifiers.eventModifiers
+                )
+            }
+
             CommandGroup(replacing: .saveItem) {
                 Button("Save Reader Edits") {
                     saveReaderEditAction?()
@@ -107,15 +117,6 @@ struct BookmarkedApp: App {
                     modifiers: settings.shortcut(for: .decreaseFontSize).modifiers.eventModifiers
                 )
 
-                Divider()
-
-                Button("Settings...") {
-                    SettingsWindowController.shared.show()
-                }
-                .keyboardShortcut(
-                    settings.shortcut(for: .openSettings).keyEquivalentValue,
-                    modifiers: settings.shortcut(for: .openSettings).modifiers.eventModifiers
-                )
             }
         }
 
@@ -165,34 +166,6 @@ extension FocusedValues {
     var decreaseReaderFontAction: (() -> Void)? {
         get { self[DecreaseReaderFontActionKey.self] }
         set { self[DecreaseReaderFontActionKey.self] = newValue }
-    }
-}
-
-final class SettingsWindowController {
-    static let shared = SettingsWindowController()
-
-    private var window: NSWindow?
-
-    private init() {}
-
-    @MainActor
-    func show() {
-        let window = window ?? makeWindow()
-        self.window = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @MainActor
-    private func makeWindow() -> NSWindow {
-        let controller = NSHostingController(rootView: GlobalSettingsView(settings: .shared))
-        let window = NSWindow(contentViewController: controller)
-        window.title = "Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable]
-        window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 620, height: 520))
-        window.center()
-        return window
     }
 }
 
