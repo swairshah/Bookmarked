@@ -389,6 +389,7 @@ enum HTMLContentExtractor {
             .removingMatches("<header[\\s\\S]*?</header>")
             .removingMatches("<footer[\\s\\S]*?</footer>")
             .removingMatches("<aside[\\s\\S]*?</aside>")
+            .removingMatches("<form[\\s\\S]*?</form>")
 
         let readerHTML = (simplifiedFramerHTML(from: withoutNoise, fullHTML: html) ?? withoutNoise)
             .normalizedResourceURLs(baseURL: url)
@@ -420,9 +421,9 @@ enum HTMLContentExtractor {
     }
 
     private static func primaryContentHTML(from html: String) -> String {
-        firstCapture("<article(?:\\s[^>]*)?>([\\s\\S]*?)</article>", in: html)
-            ?? firstCapture("<main(?:\\s[^>]*)?>([\\s\\S]*?)</main>", in: html)
-            ?? firstCapture("<body(?:\\s[^>]*)?>([\\s\\S]*?)</body>", in: html)
+        html.firstBalancedElementInnerHTML(named: "article")
+            ?? html.firstBalancedElementInnerHTML(named: "main")
+            ?? html.firstBalancedElementInnerHTML(named: "body")
             ?? html
     }
 
@@ -1006,6 +1007,46 @@ extension String {
             } else if !isClosing, tag.hasAnyClass(classes) {
                 blockStart = tagRange.lowerBound
                 depth = 1
+            }
+        }
+
+        return nil
+    }
+
+    func firstBalancedElementInnerHTML(named tagName: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: tagName)
+        guard let regex = try? NSRegularExpression(
+            pattern: "<(/?)\(escaped)\\b[^>]*>",
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        var startTagEnd: String.Index?
+        var depth = 0
+
+        for match in matches {
+            guard let tagRange = Range(match.range, in: self),
+                  let slashRange = Range(match.range(at: 1), in: self) else {
+                continue
+            }
+
+            let isClosing = !self[slashRange].isEmpty
+            if startTagEnd == nil {
+                guard !isClosing else { continue }
+                startTagEnd = tagRange.upperBound
+                depth = 1
+                continue
+            }
+
+            if isClosing {
+                depth -= 1
+                if depth == 0, let startTagEnd {
+                    return String(self[startTagEnd..<tagRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            } else {
+                depth += 1
             }
         }
 

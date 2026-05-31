@@ -88,6 +88,43 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertFalse(content.html?.contains("LinkedIn") ?? true)
     }
 
+    func testHTMLExtractorKeepsOuterArticleWhenCardsUseNestedArticles() {
+        let html = """
+        <!doctype html>
+        <html>
+        <head>
+        <meta property="og:title" content="Reading across books with Claude Code">
+        </head>
+        <body>
+        <nav>Site nav</nav>
+        <article class="post">
+          <header><h1>Reading across books with Claude Code</h1></header>
+          <div class="prose">
+            <p>LLMs are overused to summarise and underused to help us read deeper.</p>
+            <div class="not-prose">
+              <article class="quote-card">Nested quote card that should stay in the article.</article>
+            </div>
+            <h2>How it works</h2>
+            <p>The rest of the article should not be truncated.</p>
+            <h2>What I learned</h2>
+            <p>Nested article cards should not end the extraction early.</p>
+          </div>
+          <form><h3>Stay in the loop</h3><input type="email"></form>
+        </article>
+        </body>
+        </html>
+        """
+
+        let content = HTMLContentExtractor.extract(from: html, url: URL(string: "https://pieterma.es/syntopic-reading-claude/")!)
+
+        XCTAssertEqual(content.title, "Reading across books with Claude Code")
+        XCTAssertTrue(content.html?.contains("Nested quote card that should stay in the article.") ?? false)
+        XCTAssertTrue(content.html?.contains("How it works") ?? false)
+        XCTAssertTrue(content.html?.contains("What I learned") ?? false)
+        XCTAssertFalse(content.html?.contains("Stay in the loop") ?? true)
+        XCTAssertFalse(content.text.contains("Stay in the loop"))
+    }
+
     func testReaderBlocksParseMarkdownStructure() {
         let blocks = ReaderBlock.parse("# Title\n\nIntro paragraph with **bold**.\n\n- One\n- Two")
 
