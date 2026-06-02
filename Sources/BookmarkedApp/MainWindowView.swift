@@ -425,6 +425,7 @@ struct EditableReaderView: View {
     @State private var isEditing = false
     @State private var draftText = ""
     @State private var isEditingHTML = false
+    @State private var htmlEditorCommand = ReaderHTMLEditorCommand()
     @FocusState private var editorFocused: Bool
 
     var body: some View {
@@ -488,9 +489,13 @@ struct EditableReaderView: View {
                 Spacer()
                 if isEditingHTML {
                     Button("Strip Images") {
-                        draftText = draftText.strippingHTMLImages()
+                        htmlEditorCommand = htmlEditorCommand.next(.stripImages)
                     }
                     .help("Remove image and figure markup from this reader version")
+                    Button("Remove Selected") {
+                        htmlEditorCommand = htmlEditorCommand.next(.removeSelected)
+                    }
+                    .help("Remove the highlighted block from this reader version")
                 }
                 Button("Cancel") {
                     isEditing = false
@@ -508,12 +513,23 @@ struct EditableReaderView: View {
 
             Divider()
 
-            TextEditor(text: $draftText)
-                .font(isEditingHTML ? fontPreferences.codeFont(size: 13) : fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
-                .lineSpacing(6)
-                .padding(.horizontal, 44)
-                .padding(.vertical, 30)
-                .focused($editorFocused)
+            if isEditingHTML {
+                ReaderHTMLEditorView(
+                    html: $draftText,
+                    baseURL: item.url,
+                    fontChoice: fontChoice,
+                    fontPreferences: fontPreferences,
+                    fontScale: fontScale,
+                    command: htmlEditorCommand
+                )
+            } else {
+                TextEditor(text: $draftText)
+                    .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
+                    .lineSpacing(6)
+                    .padding(.horizontal, 44)
+                    .padding(.vertical, 30)
+                    .focused($editorFocused)
+            }
         }
         .background(Color(nsColor: .textBackgroundColor))
     }
@@ -522,8 +538,10 @@ struct EditableReaderView: View {
         isEditingHTML = item.readerHTML?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         draftText = editableSource
         isEditing = true
-        DispatchQueue.main.async {
-            editorFocused = true
+        if !isEditingHTML {
+            DispatchQueue.main.async {
+                editorFocused = true
+            }
         }
     }
 
