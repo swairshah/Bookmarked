@@ -322,7 +322,7 @@ final class BookmarkedTests: XCTestCase {
         )
 
         XCTAssertTrue(preferences.cssFontFamily(for: .serif).contains(#""Literata""#))
-        XCTAssertTrue(preferences.cssHeadingFontFamily.contains(#""Avenir Next""#))
+        XCTAssertTrue(preferences.cssHeadingFontFamily.contains(#""Literata""#))
         XCTAssertTrue(preferences.cssMonoFontFamily.contains(#""JetBrains \"Mono\"""#))
         XCTAssertTrue(preferences.cssMonoFontFamily.contains("ui-monospace"))
     }

@@ -5,7 +5,6 @@ struct ReaderHTMLView: NSViewRepresentable {
     let title: String
     let html: String
     let baseURL: URL?
-    let fontChoice: ReaderFontChoice
     let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     var onEditSource: (() -> Void)?
@@ -39,9 +38,9 @@ struct ReaderHTMLView: NSViewRepresentable {
           margin: 0;
           background: transparent;
           color: CanvasText;
-          font-family: \(fontChoice.cssFontFamily(preferences: fontPreferences));
-          font-size: \(fontChoice.cssFontSize(scale: fontScale));
-          line-height: \(fontChoice.cssLineHeight);
+          font-family: \(fontPreferences.cssArticleFontFamily);
+          font-size: \(fontPreferences.cssArticleFontSize(scale: fontScale));
+          line-height: \(fontPreferences.cssArticleLineHeight);
         }
         main {
           max-width: 820px;
@@ -49,7 +48,7 @@ struct ReaderHTMLView: NSViewRepresentable {
           padding: 38px 48px 80px;
         }
         h1, h2, h3, h4, h5, h6 {
-          font-family: \(fontPreferences.cssHeadingFontFamily);
+          font-family: \(fontPreferences.cssHeadingFontFamily) !important;
           line-height: 1.18;
           margin: 1.45em 0 0.45em;
           font-weight: 720;
@@ -90,11 +89,11 @@ struct ReaderHTMLView: NSViewRepresentable {
           padding: 14px 16px;
           border-radius: 8px;
           background: color-mix(in srgb, CanvasText 8%, transparent);
-          font-size: 0.86em;
+          font-size: \(fontPreferences.cssCodeFontSize);
         }
         code {
           font-family: \(fontPreferences.cssMonoFontFamily);
-          font-size: 0.88em;
+          font-size: \(fontPreferences.cssCodeFontSize);
           background: color-mix(in srgb, CanvasText 8%, transparent);
           padding: 0.12em 0.28em;
           border-radius: 4px;

@@ -39,10 +39,16 @@ struct ReaderFontPreferences: Equatable {
     static let defaultSerifName = "New York"
     static let defaultSansName = "SF Pro Text"
     static let defaultMonoName = "SF Mono"
+    static let defaultArticleSize = 18.0
+    static let defaultInterfaceSize = 13.0
+    static let defaultCodeSize = 13.0
     static let defaults = ReaderFontPreferences(
         serifName: defaultSerifName,
         sansName: defaultSansName,
-        monoName: defaultMonoName
+        monoName: defaultMonoName,
+        articleSize: defaultArticleSize,
+        interfaceSize: defaultInterfaceSize,
+        codeSize: defaultCodeSize
     )
     static let availableFontFamilyNames = NSFontManager.shared.availableFontFamilies.sorted {
         $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
@@ -51,6 +57,9 @@ struct ReaderFontPreferences: Equatable {
     var serifName: String
     var sansName: String
     var monoName: String
+    var articleSize: Double = Self.defaultArticleSize
+    var interfaceSize: Double = Self.defaultInterfaceSize
+    var codeSize: Double = Self.defaultCodeSize
 
     func swiftUIFont(for choice: ReaderFontChoice, scale: Double = 1) -> Font {
         let size: Double
@@ -63,12 +72,20 @@ struct ReaderFontPreferences: Equatable {
         return font(named: fontName(for: choice), size: size * scale, fallback: choice)
     }
 
+    func articleFont(scale: Double = 1) -> Font {
+        font(named: serifName, size: articleSize * scale, fallback: .serif)
+    }
+
     func headingFont(level: Int) -> Font {
-        font(named: sansName, size: headingSize(level), fallback: .sans)
+        font(named: serifName, size: headingSize(level), fallback: .serif)
+    }
+
+    func interfaceFont(size: Double) -> Font {
+        font(named: sansName, size: scaledInterfaceSize(size), fallback: .sans)
     }
 
     func codeFont(size: Double) -> Font {
-        font(named: monoName, size: size, fallback: .mono)
+        font(named: monoName, size: scaledCodeSize(size), fallback: .mono)
     }
 
     func cssFontFamily(for choice: ReaderFontChoice) -> String {
@@ -83,11 +100,31 @@ struct ReaderFontPreferences: Equatable {
     }
 
     var cssHeadingFontFamily: String {
-        cssFamily(primary: sansName, defaultName: Self.defaultSansName, fallback: #"-apple-system, BlinkMacSystemFont, system-ui, sans-serif"#)
+        cssArticleFontFamily
+    }
+
+    var cssArticleFontFamily: String {
+        cssFontFamily(for: .serif)
+    }
+
+    func cssArticleFontSize(scale: Double = 1) -> String {
+        "\(Int((articleSize * scale).rounded()))px"
+    }
+
+    var cssArticleLineHeight: String {
+        "1.66"
+    }
+
+    var cssInterfaceFontFamily: String {
+        cssFontFamily(for: .sans)
     }
 
     var cssMonoFontFamily: String {
         cssFamily(primary: monoName, defaultName: Self.defaultMonoName, fallback: #"ui-monospace, Menlo, monospace"#)
+    }
+
+    var cssCodeFontSize: String {
+        "\(Int(codeSize.rounded()))px"
     }
 
     private func fontName(for choice: ReaderFontChoice) -> String {
@@ -145,12 +182,22 @@ struct ReaderFontPreferences: Equatable {
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
+        let scale: Double
         switch level {
-        case 1: return 30
-        case 2: return 24
-        case 3: return 20
-        default: return 18
+        case 1: scale = 30 / Self.defaultArticleSize
+        case 2: scale = 24 / Self.defaultArticleSize
+        case 3: scale = 20 / Self.defaultArticleSize
+        default: scale = 1
         }
+        return CGFloat(articleSize * scale)
+    }
+
+    private func scaledInterfaceSize(_ size: Double) -> Double {
+        size * interfaceSize / Self.defaultInterfaceSize
+    }
+
+    private func scaledCodeSize(_ size: Double) -> Double {
+        size * codeSize / Self.defaultCodeSize
     }
 
     private func cssFamily(primary: String, defaultName: String, fallback: String) -> String {

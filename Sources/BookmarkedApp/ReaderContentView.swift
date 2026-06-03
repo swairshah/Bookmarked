@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ReaderContentView: View {
     let text: String
-    let fontChoice: ReaderFontChoice
     let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     var emptyMessage = "No indexed text yet."
@@ -70,14 +69,14 @@ struct ReaderContentView: View {
                 .padding(.bottom, 2)
         case .paragraph:
             Text(block.inlineAttributed)
-                .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
+                .font(fontPreferences.articleFont(scale: fontScale))
                 .lineSpacing(7)
         case .bullet:
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("•")
                     .font(.system(size: 17, weight: .semibold))
                 Text(block.inlineAttributed)
-                    .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
+                    .font(fontPreferences.articleFont(scale: fontScale))
                     .lineSpacing(6)
             }
             .padding(.leading, 8)

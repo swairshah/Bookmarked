@@ -39,7 +39,8 @@ struct MainWindowView: View {
     @State private var query = ""
     @State private var isSidebarVisible = true
     @AppStorage("mainSidebarWidth") private var sidebarWidth = 360.0
-    @AppStorage("readerMonoFontName") private var sidebarMonoFontName = ReaderFontPreferences.defaultMonoName
+    @AppStorage("readerSansFontName") private var sidebarInterfaceFontName = ReaderFontPreferences.defaultSansName
+    @AppStorage("readerInterfaceFontSize") private var sidebarInterfaceFontSize = ReaderFontPreferences.defaultInterfaceSize
     @FocusState private var focusedField: MainWindowFocusField?
 
     private var results: [BookmarkItem] {
@@ -53,8 +54,9 @@ struct MainWindowView: View {
     private var sidebarFontPreferences: ReaderFontPreferences {
         ReaderFontPreferences(
             serifName: ReaderFontPreferences.defaultSerifName,
-            sansName: ReaderFontPreferences.defaultSansName,
-            monoName: sidebarMonoFontName
+            sansName: sidebarInterfaceFontName,
+            monoName: ReaderFontPreferences.defaultMonoName,
+            interfaceSize: sidebarInterfaceFontSize
         )
     }
 
@@ -116,7 +118,7 @@ struct MainWindowView: View {
 
                 TextField("Search bookmarks", text: $query)
                     .textFieldStyle(.roundedBorder)
-                    .font(sidebarFontPreferences.codeFont(size: 12))
+                    .font(sidebarFontPreferences.interfaceFont(size: 12))
                     .focused($focusedField, equals: .search)
                     .onSubmit {
                         releaseSearchFocus()
@@ -128,18 +130,18 @@ struct MainWindowView: View {
 
             HStack {
                 Text("\(results.count) bookmarks")
-                    .font(sidebarFontPreferences.codeFont(size: 12).weight(.medium))
+                    .font(sidebarFontPreferences.interfaceFont(size: 12).weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if store.isCapturing {
                     ProgressView()
                         .controlSize(.small)
                     Text("Capturing")
-                        .font(sidebarFontPreferences.codeFont(size: 11).weight(.medium))
+                        .font(sidebarFontPreferences.interfaceFont(size: 11).weight(.medium))
                         .foregroundStyle(.secondary)
                 } else if let status = store.statusMessage {
                     Text(status)
-                        .font(sidebarFontPreferences.codeFont(size: 11))
+                        .font(sidebarFontPreferences.interfaceFont(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -261,21 +263,22 @@ struct FullScreenReaderView: View {
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var noteFocusToken = 0
     @State private var webFontScale = 1.0
-    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
     @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
     @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
     @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
-
-    private var readerFontChoice: ReaderFontChoice {
-        ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif
-    }
+    @AppStorage("readerArticleFontSize") private var readerArticleFontSize = ReaderFontPreferences.defaultArticleSize
+    @AppStorage("readerInterfaceFontSize") private var readerInterfaceFontSize = ReaderFontPreferences.defaultInterfaceSize
+    @AppStorage("readerCodeFontSize") private var readerCodeFontSize = ReaderFontPreferences.defaultCodeSize
 
     private var readerFontPreferences: ReaderFontPreferences {
         ReaderFontPreferences(
             serifName: readerSerifFontName,
             sansName: readerSansFontName,
-            monoName: readerMonoFontName
+            monoName: readerMonoFontName,
+            articleSize: readerArticleFontSize,
+            interfaceSize: readerInterfaceFontSize,
+            codeSize: readerCodeFontSize
         )
     }
 
@@ -361,7 +364,6 @@ struct FullScreenReaderView: View {
         EditableReaderView(
             item: item,
             store: store,
-            fontChoice: readerFontChoice,
             fontPreferences: readerFontPreferences,
             fontScale: readerFontScale
         )
@@ -372,7 +374,6 @@ struct FullScreenReaderView: View {
         EditableBookmarkNoteView(
             item: item,
             store: store,
-            fontChoice: readerFontChoice,
             fontPreferences: readerFontPreferences,
             fontScale: readerFontScale,
             focusToken: noteFocusToken
@@ -426,7 +427,6 @@ struct FullScreenReaderView: View {
 struct EditableReaderView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
-    let fontChoice: ReaderFontChoice
     let fontPreferences: ReaderFontPreferences
     let fontScale: Double
 
@@ -467,7 +467,6 @@ struct EditableReaderView: View {
                 title: item.title,
                 html: html,
                 baseURL: item.url,
-                fontChoice: fontChoice,
                 fontPreferences: fontPreferences,
                 fontScale: fontScale,
                 onEditSource: beginEditing,
@@ -478,7 +477,6 @@ struct EditableReaderView: View {
         } else {
             ReaderContentView(
                 text: item.contentText,
-                fontChoice: fontChoice,
                 fontPreferences: fontPreferences,
                 fontScale: fontScale,
                 onEditSource: beginEditing
@@ -525,14 +523,13 @@ struct EditableReaderView: View {
                 ReaderHTMLEditorView(
                     html: $draftText,
                     baseURL: item.url,
-                    fontChoice: fontChoice,
                     fontPreferences: fontPreferences,
                     fontScale: fontScale,
                     command: htmlEditorCommand
                 )
             } else {
                 TextEditor(text: $draftText)
-                    .font(fontChoice.swiftUIFont(scale: fontScale, preferences: fontPreferences))
+                    .font(fontPreferences.articleFont(scale: fontScale))
                     .lineSpacing(6)
                     .padding(.horizontal, 44)
                     .padding(.vertical, 30)
@@ -569,7 +566,6 @@ struct EditableReaderView: View {
 struct EditableBookmarkNoteView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
-    let fontChoice: ReaderFontChoice
     let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     let focusToken: Int
@@ -613,7 +609,6 @@ struct EditableBookmarkNoteView: View {
     private var reader: some View {
         ReaderContentView(
             text: item.note ?? "",
-            fontChoice: fontChoice,
             fontPreferences: fontPreferences,
             fontScale: fontScale,
             emptyMessage: "No notes yet."
@@ -811,7 +806,7 @@ struct BookmarkRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(fontPreferences.codeFont(size: 13).weight(.semibold))
+                    .font(fontPreferences.interfaceFont(size: 13).weight(.semibold))
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     Text(item.kind.rawValue)
@@ -820,11 +815,11 @@ struct BookmarkRow: View {
                         Text(creator)
                     }
                 }
-                .font(fontPreferences.codeFont(size: 11))
+                .font(fontPreferences.interfaceFont(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(fontPreferences.codeFont(size: 10))
+                    .font(fontPreferences.interfaceFont(size: 10))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -856,22 +851,22 @@ struct BookmarkDetailView: View {
     @State private var noteFocusToken = 0
     @State private var webFontScale = 1.0
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
-    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
     @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
     @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
     @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
-
-    private var readerFontChoice: ReaderFontChoice {
-        get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
-        nonmutating set { readerFontChoiceRaw = newValue.rawValue }
-    }
+    @AppStorage("readerArticleFontSize") private var readerArticleFontSize = ReaderFontPreferences.defaultArticleSize
+    @AppStorage("readerInterfaceFontSize") private var readerInterfaceFontSize = ReaderFontPreferences.defaultInterfaceSize
+    @AppStorage("readerCodeFontSize") private var readerCodeFontSize = ReaderFontPreferences.defaultCodeSize
 
     private var readerFontPreferences: ReaderFontPreferences {
         ReaderFontPreferences(
             serifName: readerSerifFontName,
             sansName: readerSansFontName,
-            monoName: readerMonoFontName
+            monoName: readerMonoFontName,
+            articleSize: readerArticleFontSize,
+            interfaceSize: readerInterfaceFontSize,
+            codeSize: readerCodeFontSize
         )
     }
 
@@ -936,7 +931,7 @@ struct BookmarkDetailView: View {
             }
 
             Text(item.title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(readerFontPreferences.interfaceFont(size: 14).weight(.semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .contentShape(Rectangle())
@@ -991,7 +986,7 @@ struct BookmarkDetailView: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.title)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(readerFontPreferences.interfaceFont(size: 22).weight(.semibold))
                         .lineLimit(2)
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
@@ -1122,7 +1117,6 @@ struct BookmarkDetailView: View {
         EditableReaderView(
             item: item,
             store: store,
-            fontChoice: readerFontChoice,
             fontPreferences: readerFontPreferences,
             fontScale: readerFontScale
         )
@@ -1133,7 +1127,6 @@ struct BookmarkDetailView: View {
         EditableBookmarkNoteView(
             item: item,
             store: store,
-            fontChoice: readerFontChoice,
             fontPreferences: readerFontPreferences,
             fontScale: readerFontScale,
             focusToken: noteFocusToken
@@ -1522,56 +1515,50 @@ private struct CacheUsageRow: View {
 }
 
 private struct FontSettingsPane: View {
-    @AppStorage("readerFontChoice") private var readerFontChoiceRaw = ReaderFontChoice.serif.rawValue
     @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
     @AppStorage("readerSansFontName") private var readerSansFontName = ReaderFontPreferences.defaultSansName
     @AppStorage("readerMonoFontName") private var readerMonoFontName = ReaderFontPreferences.defaultMonoName
-
-    private var readerFontChoice: ReaderFontChoice {
-        get { ReaderFontChoice(rawValue: readerFontChoiceRaw) ?? .serif }
-        nonmutating set { readerFontChoiceRaw = newValue.rawValue }
-    }
+    @AppStorage("readerArticleFontSize") private var readerArticleFontSize = ReaderFontPreferences.defaultArticleSize
+    @AppStorage("readerInterfaceFontSize") private var readerInterfaceFontSize = ReaderFontPreferences.defaultInterfaceSize
+    @AppStorage("readerCodeFontSize") private var readerCodeFontSize = ReaderFontPreferences.defaultCodeSize
 
     var body: some View {
         Form {
-            Section("Body Style") {
-                Picker("", selection: Binding(
-                    get: { readerFontChoice },
-                    set: { readerFontChoice = $0 }
-                )) {
-                    ForEach(ReaderFontChoice.allCases) { choice in
-                        Text(choice.rawValue).tag(choice)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 260)
-            }
-
-            Section("Font Families") {
-                ReaderFontNameField(
-                    title: "Serif",
+            Section("Fonts") {
+                ReaderFontSettingsRow(
+                    title: "Article",
                     text: $readerSerifFontName,
-                    defaultName: ReaderFontPreferences.defaultSerifName
+                    defaultName: ReaderFontPreferences.defaultSerifName,
+                    size: $readerArticleFontSize,
+                    defaultSize: ReaderFontPreferences.defaultArticleSize,
+                    sizeRange: 12...30
                 )
-                ReaderFontNameField(
-                    title: "Sans",
+                ReaderFontSettingsRow(
+                    title: "Interface",
                     text: $readerSansFontName,
-                    defaultName: ReaderFontPreferences.defaultSansName
+                    defaultName: ReaderFontPreferences.defaultSansName,
+                    size: $readerInterfaceFontSize,
+                    defaultSize: ReaderFontPreferences.defaultInterfaceSize,
+                    sizeRange: 10...22
                 )
-                ReaderFontNameField(
-                    title: "Mono",
+                ReaderFontSettingsRow(
+                    title: "Code",
                     text: $readerMonoFontName,
-                    defaultName: ReaderFontPreferences.defaultMonoName
+                    defaultName: ReaderFontPreferences.defaultMonoName,
+                    size: $readerCodeFontSize,
+                    defaultSize: ReaderFontPreferences.defaultCodeSize,
+                    sizeRange: 10...24
                 )
             }
 
             Section("Preview") {
                 Text("A reader paragraph with code")
-                    .font(readerFontChoice.swiftUIFont(preferences: fontPreferences))
-                Text("Headings use the sans font")
+                    .font(fontPreferences.articleFont())
+                Text("Article headings use the article font")
                     .font(fontPreferences.headingFont(level: 3).weight(.semibold))
-                Text("let mono = \"code\"")
+                Text("Interface titles use the interface font")
+                    .font(fontPreferences.interfaceFont(size: 15).weight(.semibold))
+                Text("let code = \"sample\"")
                     .font(fontPreferences.codeFont(size: 13))
                     .foregroundStyle(.secondary)
             }
@@ -1584,21 +1571,28 @@ private struct FontSettingsPane: View {
         ReaderFontPreferences(
             serifName: readerSerifFontName,
             sansName: readerSansFontName,
-            monoName: readerMonoFontName
+            monoName: readerMonoFontName,
+            articleSize: readerArticleFontSize,
+            interfaceSize: readerInterfaceFontSize,
+            codeSize: readerCodeFontSize
         )
     }
 }
 
-private struct ReaderFontNameField: View {
+private struct ReaderFontSettingsRow: View {
     let title: String
     @Binding var text: String
     let defaultName: String
+    @Binding var size: Double
+    let defaultSize: Double
+    let sizeRange: ClosedRange<Double>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
+                    .frame(width: 70, alignment: .leading)
 
                 FontFamilyComboBox(
                     text: $text,
@@ -1608,11 +1602,19 @@ private struct ReaderFontNameField: View {
                 .frame(minWidth: 240, maxWidth: 460)
                 .frame(height: 24)
 
-                Button("Reset") {
-                    text = defaultName
+                Stepper(value: $size, in: sizeRange, step: 1) {
+                    Text("\(Int(size.rounded())) pt")
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(width: 48, alignment: .trailing)
                 }
                 .controlSize(.small)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines) == defaultName)
+
+                Button("Reset") {
+                    text = defaultName
+                    size = defaultSize
+                }
+                .controlSize(.small)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines) == defaultName && size == defaultSize)
             }
         }
         .padding(.vertical, 4)

@@ -19,7 +19,6 @@ struct ReaderHTMLEditorCommand: Equatable {
 struct ReaderHTMLEditorView: NSViewRepresentable {
     @Binding var html: String
     let baseURL: URL?
-    let fontChoice: ReaderFontChoice
     let fontPreferences: ReaderFontPreferences
     let fontScale: Double
     let command: ReaderHTMLEditorCommand
@@ -40,11 +39,12 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
         context.coordinator.webView = nsView
 
         let styleKey = [
-            fontChoice.cssFontFamily(preferences: fontPreferences),
-            fontChoice.cssFontSize(scale: fontScale),
-            fontChoice.cssLineHeight,
+            fontPreferences.cssArticleFontFamily,
+            fontPreferences.cssArticleFontSize(scale: fontScale),
+            fontPreferences.cssArticleLineHeight,
             fontPreferences.cssHeadingFontFamily,
-            fontPreferences.cssMonoFontFamily
+            fontPreferences.cssMonoFontFamily,
+            fontPreferences.cssCodeFontSize
         ].joined(separator: "|")
 
         if context.coordinator.currentHTML == nil || context.coordinator.currentHTML != html || context.coordinator.styleKey != styleKey {
@@ -95,9 +95,9 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
           margin: 0;
           background: transparent;
           color: CanvasText;
-          font-family: \(fontChoice.cssFontFamily(preferences: fontPreferences));
-          font-size: \(fontChoice.cssFontSize(scale: fontScale));
-          line-height: \(fontChoice.cssLineHeight);
+          font-family: \(fontPreferences.cssArticleFontFamily);
+          font-size: \(fontPreferences.cssArticleFontSize(scale: fontScale));
+          line-height: \(fontPreferences.cssArticleLineHeight);
         }
         .editor-shell {
           max-width: 860px;
@@ -116,7 +116,7 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
           outline: none;
         }
         h1, h2, h3, h4, h5, h6 {
-          font-family: \(fontPreferences.cssHeadingFontFamily);
+          font-family: \(fontPreferences.cssHeadingFontFamily) !important;
           line-height: 1.18;
           margin: 1.45em 0 0.45em;
           font-weight: 720;
@@ -169,11 +169,11 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
           padding: 14px 16px;
           border-radius: 8px;
           background: color-mix(in srgb, CanvasText 8%, transparent);
-          font-size: 0.86em;
+          font-size: \(fontPreferences.cssCodeFontSize);
         }
         code {
           font-family: \(fontPreferences.cssMonoFontFamily);
-          font-size: 0.88em;
+          font-size: \(fontPreferences.cssCodeFontSize);
           background: color-mix(in srgb, CanvasText 8%, transparent);
           padding: 0.12em 0.28em;
           border-radius: 4px;
