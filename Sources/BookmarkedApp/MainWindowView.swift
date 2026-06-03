@@ -308,7 +308,7 @@ struct FullScreenReaderView: View {
             store.ensureAssets(for: item)
         }
         .onChange(of: item.id) { _ in
-            previewMode = .reader
+            reconcilePreviewModeForCurrentItem()
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousPreviewTab)) { _ in
             movePreviewTab(by: -1)
@@ -399,6 +399,11 @@ struct FullScreenReaderView: View {
             return
         }
         previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
+    }
+
+    private func reconcilePreviewModeForCurrentItem() {
+        guard !previewModes.contains(previewMode) else { return }
+        previewMode = previewModes.first ?? .reader
     }
 
     private func adjustFontScale(delta: Double) {
@@ -884,8 +889,7 @@ struct BookmarkDetailView: View {
         }
         .background(previewKeyboardShortcuts)
         .onChange(of: item.id) { _ in
-            previewMode = .reader
-            previousPreviewMode = .reader
+            reconcilePreviewModeForCurrentItem()
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousPreviewTab)) { _ in
             movePreviewTab(by: -1)
@@ -1163,6 +1167,17 @@ struct BookmarkDetailView: View {
             return
         }
         previewMode = modes[(currentIndex + offset + modes.count) % modes.count]
+    }
+
+    private func reconcilePreviewModeForCurrentItem() {
+        if previewMode == .settings {
+            previousPreviewMode = previewModes.contains(previousPreviewMode) ? previousPreviewMode : .reader
+            return
+        }
+
+        guard !previewModes.contains(previewMode) else { return }
+        previewMode = previewModes.first ?? .reader
+        previousPreviewMode = previewMode
     }
 
     private func adjustFontScale(delta: Double) {
