@@ -88,6 +88,11 @@ private final class BookmarkedWindow: NSWindow {
         super.sendEvent(event)
     }
 
+    override func noResponder(for eventSelector: Selector) {
+        guard eventSelector != #selector(NSResponder.keyDown(with:)) else { return }
+        super.noResponder(for: eventSelector)
+    }
+
     private func handleConfiguredShortcut(_ event: NSEvent) -> Bool {
         guard let action = BookmarkedSettings.shared.action(matching: event) else { return false }
 
