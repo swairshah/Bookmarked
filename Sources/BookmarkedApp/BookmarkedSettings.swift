@@ -73,7 +73,7 @@ enum BookmarkedShortcutAction: String, CaseIterable, Identifiable {
         case .toggleSidebar:
             return .init(keyCode: kVK_ANSI_B, keyEquivalent: "b", displayKey: "B", modifiers: [.command])
         case .focusSearch:
-            return .init(keyCode: kVK_ANSI_F, keyEquivalent: "f", displayKey: "F", modifiers: [.control])
+            return .init(keyCode: kVK_ANSI_Slash, keyEquivalent: "/", displayKey: "/", modifiers: [.command])
         case .toggleCompactHeader:
             return .init(keyCode: kVK_ANSI_M, keyEquivalent: "m", displayKey: "M", modifiers: [.control])
         case .previousBookmark:

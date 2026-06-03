@@ -102,7 +102,7 @@ struct MainWindowView: View {
             moveSelection(by: 1)
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleSearchFocus)) { _ in
-            toggleSearchFocus()
+            focusSearch()
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedToggleSidebar)) { _ in
             toggleSidebar()
@@ -118,6 +118,9 @@ struct MainWindowView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(sidebarFontPreferences.codeFont(size: 12))
                     .focused($focusedField, equals: .search)
+                    .onSubmit {
+                        releaseSearchFocus()
+                    }
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -227,19 +230,19 @@ struct MainWindowView: View {
         controller.selection = results[nextIndex].id
     }
 
-    private func toggleSearchFocus() {
-        if focusedField == .search {
-            focusedField = nil
-            DispatchQueue.main.async {
-                NSApp.keyWindow?.makeFirstResponder(nil)
+    private func focusSearch() {
+        if !isSidebarVisible {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isSidebarVisible = true
             }
-        } else {
-            if !isSidebarVisible {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isSidebarVisible = true
-                }
-            }
-            focusedField = .search
+        }
+        focusedField = .search
+    }
+
+    private func releaseSearchFocus() {
+        focusedField = nil
+        DispatchQueue.main.async {
+            NSApp.keyWindow?.makeFirstResponder(nil)
         }
     }
 
