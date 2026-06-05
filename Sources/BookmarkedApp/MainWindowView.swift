@@ -308,7 +308,6 @@ struct FullScreenReaderView: View {
                 .padding(.trailing, 10)
             }
         }
-        .background(noteKeyboardShortcut)
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear {
             store.ensureAssets(for: item)
@@ -378,21 +377,6 @@ struct FullScreenReaderView: View {
             fontScale: readerFontScale,
             focusToken: noteFocusToken
         )
-    }
-
-    private var noteKeyboardShortcut: some View {
-        Group {
-            if previewMode == .notes {
-                Button("") {
-                    focusNoteEditor()
-                }
-                .keyboardShortcut(.return, modifiers: [])
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .allowsHitTesting(false)
     }
 
     private func movePreviewTab(by offset: Int) {
@@ -590,16 +574,14 @@ struct EditableBookmarkNoteView: View {
             }
         }
         .onDisappear {
-            if isEditing {
-                save()
-            }
+            autosaveDraft()
         }
         .onChange(of: item.id) { _ in
-            if isEditing {
-                save()
-            }
+            autosaveDraft()
             draftText = item.note ?? ""
             isEditing = false
+            focusEditor = false
+            editingItemID = nil
         }
         .onChange(of: focusToken) { _ in
             beginEditing()
@@ -613,6 +595,8 @@ struct EditableBookmarkNoteView: View {
             fontScale: fontScale,
             emptyMessage: "No notes yet."
         )
+        .padding(.leading, 28)
+        .foregroundStyle(Color(nsColor: .labelColor).opacity(0.82))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             beginEditing()
@@ -620,44 +604,15 @@ struct EditableBookmarkNoteView: View {
     }
 
     private var editor: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Notes")
-                    .font(.system(size: 13, weight: .semibold))
-
-                Spacer()
-
-                Button {
-                    cancel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.bordered)
-                .help("Discard note edits")
-
-                Button {
-                    save()
-                } label: {
-                    Image(systemName: "checkmark")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.borderedProminent)
-                .help("Save note")
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(Color(nsColor: .controlBackgroundColor))
-
-            Divider()
-
-            EscapeCommitTextEditor(
-                text: $draftText,
-                onEscape: save,
-                focusRequest: $focusEditor
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        AutosavingArticleTextEditor(
+            text: $draftText,
+            fontPreferences: fontPreferences,
+            fontScale: fontScale,
+            focusRequest: $focusEditor,
+            onTextChange: autosaveText,
+            onEscape: finishEditing
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
     }
 
@@ -668,25 +623,31 @@ struct EditableBookmarkNoteView: View {
         focusEditor = true
     }
 
-    private func save() {
-        store.setNote(id: editingItemID ?? item.id, text: draftText)
-        isEditing = false
-        focusEditor = false
-        editingItemID = nil
+    private func autosaveText(_ text: String) {
+        guard isEditing || editingItemID != nil else { return }
+        store.setNote(id: editingItemID ?? item.id, text: text, showsStatus: false)
     }
 
-    private func cancel() {
-        draftText = item.note ?? ""
+    private func autosaveDraft() {
+        guard isEditing || editingItemID != nil else { return }
+        store.setNote(id: editingItemID ?? item.id, text: draftText, showsStatus: false)
+    }
+
+    private func finishEditing() {
+        autosaveDraft()
         isEditing = false
         focusEditor = false
         editingItemID = nil
     }
 }
 
-private struct EscapeCommitTextEditor: NSViewRepresentable {
+private struct AutosavingArticleTextEditor: NSViewRepresentable {
     @Binding var text: String
-    var onEscape: () -> Void
+    let fontPreferences: ReaderFontPreferences
+    let fontScale: Double
     @Binding var focusRequest: Bool
+    var onTextChange: (String) -> Void
+    var onEscape: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -697,6 +658,8 @@ private struct EscapeCommitTextEditor: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 28, bottom: 0, right: 0)
 
         let contentSize = scroll.contentSize
         let container = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: .greatestFiniteMagnitude))
@@ -708,7 +671,7 @@ private struct EscapeCommitTextEditor: NSViewRepresentable {
         storage.addLayoutManager(layout)
         layout.addTextContainer(container)
 
-        let textView = EscapeCommitNSTextView(frame: .zero, textContainer: container)
+        let textView = ArticleNoteNSTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
         textView.onEscape = onEscape
         textView.isEditable = true
@@ -717,21 +680,30 @@ private struct EscapeCommitTextEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-        textView.textContainerInset = NSSize(width: 44, height: 30)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainerInset = NSSize(width: 48, height: 34)
         textView.drawsBackground = false
         textView.allowsUndo = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.minSize = NSSize(width: 0, height: scroll.contentSize.height)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.autoresizingMask = [.width]
-        textView.string = text
+        applyTextStyle(to: textView, replaceText: text)
 
         scroll.documentView = textView
         return scroll
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
         guard let textView = nsView.documentView as? NSTextView else { return }
         if textView.string != text {
-            textView.string = text
+            context.coordinator.isApplyingUpdate = true
+            applyTextStyle(to: textView, replaceText: text)
+            context.coordinator.isApplyingUpdate = false
+        } else {
+            applyTextStyle(to: textView)
         }
         if focusRequest {
             DispatchQueue.main.async {
@@ -745,24 +717,107 @@ private struct EscapeCommitTextEditor: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: EscapeCommitTextEditor
+    private func applyTextStyle(to textView: NSTextView, replaceText: String? = nil) {
+        let attributes = Self.textAttributes(fontPreferences: fontPreferences, fontScale: fontScale)
+        textView.font = attributes.font
+        textView.defaultParagraphStyle = attributes.paragraphStyle
+        textView.typingAttributes = attributes.typingAttributes
 
-        init(_ parent: EscapeCommitTextEditor) {
+        if let replaceText {
+            textView.undoManager?.disableUndoRegistration()
+            textView.textStorage?.setAttributedString(NSAttributedString(string: replaceText, attributes: attributes.typingAttributes))
+            textView.undoManager?.enableUndoRegistration()
+        } else {
+            let range = NSRange(location: 0, length: (textView.string as NSString).length)
+            if range.length > 0 {
+                textView.undoManager?.disableUndoRegistration()
+                textView.textStorage?.addAttributes(attributes.typingAttributes, range: range)
+                textView.undoManager?.enableUndoRegistration()
+            }
+        }
+    }
+
+    private static func textAttributes(
+        fontPreferences: ReaderFontPreferences,
+        fontScale: Double
+    ) -> (font: NSFont, paragraphStyle: NSParagraphStyle, typingAttributes: [NSAttributedString.Key: Any]) {
+        let pointSize = CGFloat(fontPreferences.articleSize * fontScale)
+        let font = articleNSFont(named: fontPreferences.serifName, size: pointSize)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = max(4, pointSize * 0.28)
+        paragraphStyle.paragraphSpacing = max(9, pointSize * 0.55)
+
+        return (
+            font,
+            paragraphStyle,
+            [
+                .font: font,
+                .foregroundColor: NSColor.labelColor.withAlphaComponent(0.82),
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+    }
+
+    private static func articleNSFont(named name: String, size: CGFloat) -> NSFont {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ReaderFontPreferences.defaultSerifName
+            : name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let exactFont = NSFont(name: cleanName, size: size) {
+            return exactFont
+        }
+
+        if let members = NSFontManager.shared.availableMembers(ofFontFamily: cleanName) {
+            let candidates: [(fontName: String, faceName: String)] = members.compactMap { member in
+                guard let fontName = member.first as? String else { return nil }
+                let faceName = member.dropFirst().first as? String ?? ""
+                return (fontName, faceName)
+            }
+            if let regular = candidates.first(where: { $0.faceName.localizedCaseInsensitiveContains("regular") }),
+               let font = NSFont(name: regular.fontName, size: size) {
+                return font
+            }
+            if let first = candidates.first,
+               let font = NSFont(name: first.fontName, size: size) {
+                return font
+            }
+        }
+
+        return NSFont(name: ReaderFontPreferences.defaultSerifName, size: size)
+            ?? NSFont.systemFont(ofSize: size)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: AutosavingArticleTextEditor
+        var isApplyingUpdate = false
+
+        init(_ parent: AutosavingArticleTextEditor) {
             self.parent = parent
         }
 
         func textDidChange(_ notification: Notification) {
+            guard !isApplyingUpdate else { return }
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            parent.onTextChange(textView.string)
         }
     }
 }
 
-private final class EscapeCommitNSTextView: NSTextView {
+private final class ArticleNoteNSTextView: NSTextView {
     var onEscape: (() -> Void)?
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleUndoRedo(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
+        if handleUndoRedo(event) {
+            return
+        }
         if event.keyCode == 53 {
             onEscape?()
             DispatchQueue.main.async { [weak self] in
@@ -771,6 +826,21 @@ private final class EscapeCommitNSTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    private func handleUndoRedo(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              event.modifierFlags.contains(.command),
+              event.charactersIgnoringModifiers?.lowercased() == "z" else {
+            return false
+        }
+
+        if event.modifierFlags.contains(.shift) {
+            undoManager?.redo()
+        } else {
+            undoManager?.undo()
+        }
+        return true
     }
 }
 
@@ -1135,13 +1205,6 @@ struct BookmarkDetailView: View {
 
     private var previewKeyboardShortcuts: some View {
         Group {
-            if previewMode == .notes {
-                Button("") {
-                    focusNoteEditor()
-                }
-                .keyboardShortcut(.return, modifiers: [])
-            }
-
             if previewMode == .settings {
                 Button("") {
                     closeSettingsTab()
