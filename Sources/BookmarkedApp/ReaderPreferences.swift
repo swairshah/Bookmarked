@@ -215,3 +215,18 @@ struct ReaderFontPreferences: Equatable {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
+
+enum ReaderLinkStyle {
+    static let cssColor = "color-mix(in srgb, CanvasText 58%, transparent)"
+    static let cssDeclaration = "color: \(cssColor); text-decoration: none"
+    static let swiftUIColor = Color(nsColor: .secondaryLabelColor)
+
+    static func apply(to attributed: AttributedString) -> AttributedString {
+        var styled = attributed
+        for run in styled.runs where run.link != nil {
+            styled[run.range].foregroundColor = swiftUIColor
+            styled[run.range].underlineStyle = nil
+        }
+        return styled
+    }
+}

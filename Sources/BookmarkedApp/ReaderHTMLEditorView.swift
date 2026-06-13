@@ -142,7 +142,7 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
         }
         ul, ol { padding-left: 1.45em; }
         li { margin: 0.32em 0; }
-        a { color: #2563eb; text-decoration-thickness: 0.08em; text-underline-offset: 0.16em; }
+        a { \(ReaderLinkStyle.cssDeclaration); }
         blockquote {
           border-left: 3px solid color-mix(in srgb, CanvasText 24%, transparent);
           padding-left: 1em;

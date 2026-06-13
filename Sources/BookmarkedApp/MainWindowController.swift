@@ -35,7 +35,7 @@ final class MainWindowController: ObservableObject {
         window.title = "Bookmarked"
         window.minSize = NSSize(width: 860, height: 560)
         window.titlebarAppearsTransparent = true
-        window.titleVisibility = .visible
+        window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view)

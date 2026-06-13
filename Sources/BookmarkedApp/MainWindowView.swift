@@ -33,6 +33,79 @@ private enum BookmarkPreviewMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private struct PreviewModeChrome: View {
+    let modes: [BookmarkPreviewMode]
+    @Binding var selection: BookmarkPreviewMode
+    var showsSettings = false
+    var opacity = 0.68
+    var onSettings: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsSettings {
+                Button {
+                    onSettings?()
+                } label: {
+                    Image(systemName: selection == .settings ? "gearshape.fill" : "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 22, height: 22)
+                        .background(selectionBackground(isSelected: selection == .settings))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selection == .settings ? Color.primary.opacity(0.78) : Color.secondary.opacity(0.82))
+                .help("Settings")
+            }
+
+            if modes.count > 1 {
+                HStack(spacing: 1) {
+                    ForEach(modes) { mode in
+                        Button {
+                            selection = mode
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.system(size: 10, weight: selection == mode ? .semibold : .medium))
+                                .lineLimit(1)
+                                .frame(width: width(for: mode), height: 20)
+                                .background(selectionBackground(isSelected: selection == mode))
+                                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(selection == mode ? Color.primary.opacity(0.82) : Color.secondary.opacity(0.82))
+                    }
+                }
+                .padding(2)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.045))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+                )
+            }
+        }
+        .opacity(opacity)
+    }
+
+    private func selectionBackground(isSelected: Bool) -> Color {
+        isSelected ? Color.primary.opacity(0.12) : Color.clear
+    }
+
+    private func width(for mode: BookmarkPreviewMode) -> CGFloat {
+        switch mode {
+        case .reader:
+            return 46
+        case .notes:
+            return 42
+        case .web:
+            return 34
+        case .settings:
+            return 54
+        }
+    }
+}
+
 struct MainWindowView: View {
     @ObservedObject var store: BookmarkStore
     @ObservedObject var controller: MainWindowController
@@ -198,7 +271,8 @@ struct MainWindowView: View {
             BookmarkDetailView(
                 item: selectedItem,
                 store: store,
-                settingsTabRequestID: controller.settingsTabRequestID
+                settingsTabRequestID: controller.settingsTabRequestID,
+                usesTitlebarChrome: !isSidebarVisible
             )
         } else if controller.settingsTabRequestID > 0 {
             GlobalSettingsView(settings: BookmarkedSettings.shared, fillsAvailableSpace: true)
@@ -292,18 +366,7 @@ struct FullScreenReaderView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if previewModes.count > 1 {
-                Picker("", selection: $previewMode) {
-                    ForEach(previewModes) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .font(.system(size: 10, weight: .regular))
-                .frame(width: CGFloat(previewModes.count) * 54)
-                .scaleEffect(0.82, anchor: .topTrailing)
-                .opacity(0.52)
+                PreviewModeChrome(modes: previewModes, selection: $previewMode)
                 .padding(.top, 8)
                 .padding(.trailing, 10)
             }
@@ -915,11 +978,14 @@ struct BookmarkDetailView: View {
     let item: BookmarkItem
     @ObservedObject var store: BookmarkStore
     let settingsTabRequestID: Int
+    let usesTitlebarChrome: Bool
     @ObservedObject private var settings = BookmarkedSettings.shared
     @State private var previewMode: BookmarkPreviewMode = .reader
     @State private var previousPreviewMode: BookmarkPreviewMode = .reader
     @State private var noteFocusToken = 0
     @State private var webFontScale = 1.0
+    @State private var isCompactHeaderHovered = false
+    @State private var isTitlebarHeaderHovered = false
     @AppStorage("detailHeaderCompact") private var isHeaderCompact = false
     @AppStorage("readerFontScale") private var readerFontScale = 1.0
     @AppStorage("readerSerifFontName") private var readerSerifFontName = ReaderFontPreferences.defaultSerifName
@@ -950,10 +1016,29 @@ struct BookmarkDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            preview
+        Group {
+            if usesTitlebarChrome {
+                VStack(spacing: 0) {
+                    titlebarHeader
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 1)
+                    preview
+                }
+                .ignoresSafeArea(.container, edges: .top)
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    if isHeaderCompact {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.08))
+                            .frame(height: 1)
+                    } else {
+                        Divider()
+                    }
+                    preview
+                }
+            }
         }
         .background(previewKeyboardShortcuts)
         .onChange(of: item.id) { _ in
@@ -996,12 +1081,14 @@ struct BookmarkDetailView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 20, height: 20)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .frame(width: 15, height: 15)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .opacity(isCompactHeaderHovered ? 0.82 : 0.62)
             }
 
             Text(item.title)
-                .font(readerFontPreferences.interfaceFont(size: 14).weight(.semibold))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor).opacity(isCompactHeaderHovered ? 0.82 : 0.58))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .contentShape(Rectangle())
@@ -1012,32 +1099,63 @@ struct BookmarkDetailView: View {
 
             Spacer(minLength: 12)
 
-            Button {
-                openSettingsTab()
-            } label: {
-                Image(systemName: previewMode == .settings ? "gearshape.fill" : "gearshape")
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(previewMode == .settings ? Color.accentColor : Color.primary)
-            .help("Settings")
-
-            if previewModes.count > 1 {
-                Picker("", selection: $previewMode) {
-                    ForEach(previewModes) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: CGFloat(previewModes.count) * 62)
-            }
+            PreviewModeChrome(
+                modes: previewModes,
+                selection: $previewMode,
+                showsSettings: true,
+                opacity: isCompactHeaderHovered ? 0.66 : 0.42,
+                onSettings: openSettingsTab
+            )
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(minHeight: 34)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.top, 5)
+        .padding(.bottom, 4)
+        .frame(minHeight: 30)
+        .background(Color(nsColor: .textBackgroundColor).opacity(isCompactHeaderHovered ? 0.72 : 0.38))
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isCompactHeaderHovered = hovering
+            }
+        }
+        .onAppear {
+            store.ensureAssets(for: item)
+        }
+    }
+
+    private var titlebarHeader: some View {
+        HStack(spacing: 10) {
+            Text(item.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor).opacity(isTitlebarHeaderHovered ? 0.82 : 0.58))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    store.open(item)
+                }
+                .help(item.url != nil || item.fileURL != nil ? "Double-click to open" : "")
+
+            Spacer(minLength: 12)
+
+            PreviewModeChrome(
+                modes: previewModes,
+                selection: $previewMode,
+                showsSettings: true,
+                opacity: isTitlebarHeaderHovered ? 0.66 : 0.42,
+                onSettings: openSettingsTab
+            )
+        }
+        .padding(.leading, 104)
+        .padding(.trailing, 12)
+        .padding(.top, 5)
+        .padding(.bottom, 4)
+        .frame(minHeight: 30)
+        .background(Color(nsColor: .textBackgroundColor).opacity(isTitlebarHeaderHovered ? 0.72 : 0.38))
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isTitlebarHeaderHovered = hovering
+            }
+        }
         .onAppear {
             store.ensureAssets(for: item)
         }
@@ -1077,17 +1195,6 @@ struct BookmarkDetailView: View {
 
                 Spacer()
 
-                if previewModes.count > 1 {
-                    Picker("", selection: $previewMode) {
-                        ForEach(previewModes) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: CGFloat(previewModes.count) * 72)
-                }
-
                 Button {
                     store.refresh(item)
                 } label: {
@@ -1099,16 +1206,12 @@ struct BookmarkDetailView: View {
                 .help("Refresh indexed content")
                 .disabled(item.url == nil)
 
-                Button {
-                    openSettingsTab()
-                } label: {
-                    Image(systemName: previewMode == .settings ? "gearshape.fill" : "gearshape")
-                        .frame(width: 22, height: 22)
-                }
-                .frame(width: 54, height: 32)
-                .buttonStyle(.bordered)
-                .foregroundStyle(previewMode == .settings ? Color.accentColor : Color.primary)
-                .help("Settings")
+                PreviewModeChrome(
+                    modes: previewModes,
+                    selection: $previewMode,
+                    showsSettings: true,
+                    onSettings: openSettingsTab
+                )
             }
 
             if !item.tags.isEmpty {
@@ -2041,7 +2144,7 @@ struct WebPreview: NSViewRepresentable {
             p, ul, ol, blockquote, pre, figure { margin: 0 0 1.05em; }
             img, video { display: block; max-width: 100%; max-height: min(70vh, 560px); width: auto; height: auto; object-fit: contain; }
             pre { white-space: pre-wrap; font: inherit; }
-            a { color: #2563eb; }
+            a { \(ReaderLinkStyle.cssDeclaration); }
             </style>
             </head>
             <body><main>\(body)</main></body>

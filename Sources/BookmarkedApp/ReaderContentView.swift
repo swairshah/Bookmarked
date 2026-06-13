@@ -97,7 +97,8 @@ struct ReaderBlock: Identifiable {
 
     var inlineAttributed: AttributedString {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (try? AttributedString(markdown: trimmed)) ?? AttributedString(trimmed)
+        let attributed = (try? AttributedString(markdown: trimmed)) ?? AttributedString(trimmed)
+        return ReaderLinkStyle.apply(to: attributed)
     }
 
     static func parse(_ raw: String) -> [ReaderBlock] {
