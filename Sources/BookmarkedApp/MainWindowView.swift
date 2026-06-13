@@ -232,9 +232,9 @@ struct MainWindowView: View {
                                 .padding(.vertical, 2)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(controller.selection == item.id ? Color.accentColor : Color.clear)
+                                        .fill(controller.selection == item.id ? Color.primary.opacity(0.08) : Color.clear)
                                 )
-                                .foregroundStyle(controller.selection == item.id ? Color.white : Color.primary)
+                                .foregroundStyle(Color.primary)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     controller.selection = item.id
