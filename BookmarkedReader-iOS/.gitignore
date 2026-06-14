@@ -7,5 +7,9 @@ DerivedData/
 # Your personal library snapshot bundled at release time (not for committing)
 BookmarkedReader/Resources/bookmarks.json
 
+# Trial-licensed "Reader" fonts — personal/local use only. Never commit or ship.
+# Shipping (Release) builds use the system "Iowan Old Style" serif instead.
+BookmarkedReader/Fonts/Reader-*.ttf
+
 # macOS cruft
 .DS_Store

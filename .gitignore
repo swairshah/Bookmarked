@@ -34,3 +34,7 @@ xcuserdata/
 .env
 .env.*
 !.env.example
+
+# Trial-licensed "Reader" fonts — personal/local use only. Never commit or ship.
+# Shipping builds use the system "Iowan Old Style" serif instead (READER_FONTS flag).
+**/Reader-*.ttf

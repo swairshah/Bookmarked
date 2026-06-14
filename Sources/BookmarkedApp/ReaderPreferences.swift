@@ -36,7 +36,14 @@ enum ReaderFontChoice: String, CaseIterable, Identifiable {
 }
 
 struct ReaderFontPreferences: Equatable {
-    static let defaultSerifName = "New York"
+#if READER_FONTS
+    // Local / personal builds: the licensed "Reader" serif (installed system-wide
+    // via Font Book). Trial-licensed — only used when READER_FONTS is defined.
+    static let defaultSerifName = "Reader"
+#else
+    // Shipping builds: the built-in "Iowan Old Style" serif.
+    static let defaultSerifName = "Iowan Old Style"
+#endif
     static let defaultSansName = "SF Pro Text"
     static let defaultMonoName = "Google Sans Code"
     static let defaultArticleSize = 18.0

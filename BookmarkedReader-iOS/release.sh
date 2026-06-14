@@ -70,6 +70,32 @@ else
     echo -e "${YELLOW}No library at $REAL_DB — this build will ship the bundled sample.${NC}"
 fi
 
+# --- Keep trial-licensed Reader fonts out of the shipping build ----------------
+# The Xcode synchronized group auto-bundles everything under BookmarkedReader/,
+# so move the Reader-*.ttf aside for the duration of the archive and restore them
+# afterward (the trap guarantees restore even on failure). In Release the app uses
+# the built-in "Iowan Old Style" serif (READER_FONTS is not defined there), so it
+# needs no Reader files. GoogleSansCode-*.ttf stay — those are the shipped mono faces.
+FONTS_DIR="BookmarkedReader/Fonts"
+FONT_STASH="$(mktemp -d)"
+restore_reader_fonts() {
+    [ -d "$FONT_STASH" ] || return 0
+    for f in "$FONT_STASH"/Reader-*.ttf; do
+        [ -e "$f" ] && mv -f "$f" "$FONTS_DIR/"
+    done
+    rmdir "$FONT_STASH" 2>/dev/null || true
+}
+trap restore_reader_fonts EXIT
+moved=0
+for f in "$FONTS_DIR"/Reader-*.ttf; do
+    [ -e "$f" ] || continue
+    mv -f "$f" "$FONT_STASH/"
+    moved=$((moved + 1))
+done
+if [ "$moved" -gt 0 ]; then
+    echo -e "${GREEN}Excluded $moved Reader font file(s) from the shipping build (using system Iowan Old Style).${NC}"
+fi
+
 # --- 1. Archive (Release, signed for a generic iOS device) ---------------------
 echo -e "${YELLOW}Archiving...${NC}"
 xcodebuild \

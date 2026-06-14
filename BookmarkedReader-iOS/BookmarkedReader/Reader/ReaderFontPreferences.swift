@@ -21,12 +21,13 @@ enum ReaderFontChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// CSS family stack for the WebView reader. Serif leads with the bundled
-    /// custom "Reader" family (defined via @font-face), matching the Mac app,
-    /// then falls back to New York. Sans/Mono use the system optical fonts.
+    /// CSS family stack for the WebView reader. Serif leads with the active
+    /// serif family — "Reader" (local, via @font-face) or "Iowan Old Style"
+    /// (shipping, a system font) — matching the Mac app, then falls back.
+    /// Sans/Mono use the system optical fonts.
     var cssFontFamily: String {
         switch self {
-        case .serif: return #""Reader", ui-serif, "New York", Georgia, serif"#
+        case .serif: return "\"\(ReaderFonts.serifFamily)\", ui-serif, \"Iowan Old Style\", \"New York\", Georgia, serif"
         case .sans:  return #"-apple-system, ui-sans-serif, "SF Pro Text", system-ui, sans-serif"#
         case .mono:  return #""Google Sans Code", ui-monospace, "SF Mono", Menlo, monospace"#
         }

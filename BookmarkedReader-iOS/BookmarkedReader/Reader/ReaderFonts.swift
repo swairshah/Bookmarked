@@ -9,13 +9,16 @@ import CoreText
 /// expose them as @font-face CSS (for the WKWebView reader, whose separate
 /// web-content process can't see process-registered fonts).
 enum ReaderFonts {
-    static let serifFamily = "Reader"
     static let codeFamily = "Google Sans Code"
-
-    static let regularName = "Reader-Regular"
-    static let boldName = "Reader-Bold"
     static let codeRegularName = "GoogleSansCode-Regular"
     static let codeBoldName = "GoogleSansCode-Bold"
+
+#if READER_FONTS
+    // Local / personal builds (READER_FONTS defined): the licensed "Reader"
+    // serif, bundled and registered as faces. Trial-licensed — never shipped.
+    static let serifFamily = "Reader"
+    static let regularName = "Reader-Regular"
+    static let boldName = "Reader-Bold"
 
     private static let serifFaces: [Face] = [
         Face("Reader-Light", 300, false), Face("Reader-LightItalic", 300, true),
@@ -23,6 +26,15 @@ enum ReaderFonts {
         Face("Reader-Medium", 500, false), Face("Reader-MediumItalic", 500, true),
         Face("Reader-Bold", 700, false), Face("Reader-BoldItalic", 700, true)
     ]
+#else
+    // Shipping builds: the built-in system "Iowan Old Style" serif. No bundled
+    // font files, so `serifFaces` is empty (nothing to register or embed).
+    static let serifFamily = "Iowan Old Style"
+    static let regularName = "IowanOldStyle-Roman"
+    static let boldName = "IowanOldStyle-Bold"
+
+    private static let serifFaces: [Face] = []
+#endif
 
     private static let codeFaces: [Face] = [
         Face("GoogleSansCode-Regular", 400, false), Face("GoogleSansCode-Italic", 400, true),

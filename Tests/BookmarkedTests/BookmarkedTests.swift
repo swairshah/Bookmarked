@@ -220,6 +220,7 @@ final class BookmarkedTests: XCTestCase {
         let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
 
         XCTAssertTrue(rewritten.contains("src=\"file://"))
+        XCTAssertTrue(rewritten.contains(#"data-bookmarked-original-src="https://example.com/images/photo.png""#))
         XCTAssertFalse(rewritten.contains("srcset="))
         XCTAssertTrue(rewritten.contains(#"href="/images/photo.png""#))
         XCTAssertFalse(rewritten.contains(#"src="/images/photo.png""#))
@@ -253,9 +254,60 @@ final class BookmarkedTests: XCTestCase {
         let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
 
         XCTAssertTrue(rewritten.contains("src=\"file://"))
+        XCTAssertTrue(rewritten.contains(#"data-bookmarked-original-src="https://example.com/images/photo.png""#))
         XCTAssertFalse(rewritten.contains("<source"))
         XCTAssertFalse(rewritten.contains("srcset="))
-        XCTAssertFalse(rewritten.contains("https://example.com/images/photo.png"))
+        XCTAssertFalse(rewritten.contains(#"<img src="https://example.com/images/photo.png"#))
+    }
+
+    func testReaderMediaCachePreservesAndRewritesVideoSources() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BookmarkedVideoTests-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let videoURL = URL(string: "https://example.com/posts/loop.mp4?t=1")!
+        let cache = ReaderImageCache(directory: directory, fetchData: { request in
+            XCTAssertEqual(request.url, videoURL)
+            let response = HTTPURLResponse(
+                url: videoURL,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "video/mp4"]
+            )!
+            return (Data([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]), response)
+        })
+
+        let html = #"<article><video autoplay muted loop playsinline><source src="/posts/loop.mp4?t=1" type="video/mp4"></video></article>"#
+        let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
+
+        XCTAssertTrue(rewritten.contains("<video"))
+        XCTAssertTrue(rewritten.contains(#"<source src="file://"#))
+        XCTAssertTrue(rewritten.contains(#"data-bookmarked-original-src="https://example.com/posts/loop.mp4?t=1""#))
+        XCTAssertFalse(rewritten.contains(#"src="/posts/loop.mp4"#))
+
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.first?.pathExtension, "mp4")
+    }
+
+    func testLocalMediaPreparationKeepsVideoSourcesButRemovesPictureSources() {
+        let html = #"<article><video><source src="clip.mp4" type="video/mp4"></video><picture><source srcset="photo.avif"><img src="photo.png"></picture></article>"#
+        let prepared = html.preparedForLocalMediaDisplay()
+
+        XCTAssertTrue(prepared.contains(#"<source src="clip.mp4" type="video/mp4">"#))
+        XCTAssertFalse(prepared.contains(#"<source srcset="photo.avif">"#))
+        XCTAssertTrue(prepared.contains(#"<img src="photo.png">"#))
+    }
+
+    func testRemoteMediaPreparationRestoresOriginalURLsForSyncedReaders() {
+        let html = #"<article><img src="file:///tmp/photo.png" data-bookmarked-original-src="https://example.com/photo.png"><video poster="file:///tmp/poster.jpg" data-bookmarked-original-poster="https://example.com/poster.jpg"><source src='file:///tmp/loop.mp4' data-bookmarked-original-src='https://example.com/loop.mp4'></video></article>"#
+        let prepared = html.preparedForRemoteMediaDisplay()
+
+        XCTAssertTrue(prepared.contains(#"<img src="https://example.com/photo.png""#))
+        XCTAssertTrue(prepared.contains(#"<video poster="https://example.com/poster.jpg""#))
+        XCTAssertTrue(prepared.contains(#"<source src="https://example.com/loop.mp4""#))
+        XCTAssertFalse(prepared.contains("file:///tmp"))
     }
 
     func testReaderImageCacheDetectsOnlyRemoteMedia() {
@@ -263,6 +315,7 @@ final class BookmarkedTests: XCTestCase {
         let pageURL = URL(string: "https://example.com/posts/a")!
 
         XCTAssertTrue(cache.hasRemoteImages(in: #"<img src="/image.png">"#, pageURL: pageURL))
+        XCTAssertTrue(cache.hasRemoteImages(in: #"<video><source src="/clip.mp4" type="video/mp4"></video>"#, pageURL: pageURL))
         XCTAssertFalse(cache.hasRemoteImages(in: #"<img src="file:///tmp/image.png">"#, pageURL: pageURL))
         XCTAssertFalse(cache.hasRemoteImages(in: #"<a href="/image.png">open</a>"#, pageURL: pageURL))
     }

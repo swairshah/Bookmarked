@@ -3,8 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.0"
-swift build -c release --product Bookmarked
+VERSION="0.1.1"
+
+# Font flavor: set READER_FONTS=1 to build the LOCAL/personal app that defaults to
+# the licensed "Reader" serif (install it once via Font Book). Unset (the default,
+# as used by scripts/release.sh) ships the built-in "Iowan Old Style" serif.
+SWIFT_FLAGS=()
+if [ -n "${READER_FONTS:-}" ]; then
+    SWIFT_FLAGS=(-Xswiftc -DREADER_FONTS)
+    echo "Font flavor: LOCAL (Reader serif — READER_FONTS set)"
+else
+    echo "Font flavor: SHIPPING (Iowan Old Style serif)"
+fi
+
+swift build -c release --product Bookmarked ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"}
 
 BINARY_PATH=".build/release"
 APP_DIR=".build/Bookmarked.app"
@@ -78,7 +90,7 @@ EOF
 
 echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
-swift build -c release --product bookmarked
+swift build -c release --product bookmarked ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"}
 cp "$BINARY_PATH/bookmarked" "$APP_DIR/Contents/MacOS/bookmarkedctl"
 
 echo "built: $APP_DIR"

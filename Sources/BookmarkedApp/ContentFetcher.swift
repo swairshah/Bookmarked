@@ -115,7 +115,7 @@ struct ReaderImageCache: Sendable {
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.setValue("Bookmarked/0.1 (+macOS bookmark image cache)", forHTTPHeaderField: "User-Agent")
-        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,video/mp4,video/webm,video/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
 
         do {
             let (data, response) = try await fetchData(request)
@@ -124,7 +124,7 @@ struct ReaderImageCache: Sendable {
             }
 
             let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
-            guard contentType.contains("image/") || isLikelyImageURL(url) else { return nil }
+            guard contentType.contains("image/") || contentType.contains("video/") || isLikelyMediaURL(url) else { return nil }
 
             let fileURL = directory
                 .appendingPathComponent(Self.cacheKey(for: url))
@@ -159,14 +159,17 @@ struct ReaderImageCache: Sendable {
         case "image/webp": return "webp"
         case "image/avif": return "avif"
         case "image/svg+xml": return "svg"
+        case "video/mp4": return "mp4"
+        case "video/webm": return "webm"
+        case "video/quicktime": return "mov"
         default:
             let ext = url.pathExtension.lowercased()
             return ext.isEmpty ? "img" : ext
         }
     }
 
-    private func isLikelyImageURL(_ url: URL) -> Bool {
-        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].contains(url.pathExtension.lowercased())
+    private func isLikelyMediaURL(_ url: URL) -> Bool {
+        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "mp4", "m4v", "mov", "webm"].contains(url.pathExtension.lowercased())
     }
 }
 
@@ -294,7 +297,7 @@ struct WebPageCache: Sendable {
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.setValue("Bookmarked/0.1 (+macOS web page cache)", forHTTPHeaderField: "User-Agent")
-        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,video/mp4,video/webm,video/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
 
         do {
             let (data, response) = try await fetchData(request)
@@ -303,7 +306,7 @@ struct WebPageCache: Sendable {
             }
 
             let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
-            guard contentType.contains("image/") || isLikelyImageURL(url) else { return nil }
+            guard contentType.contains("image/") || contentType.contains("video/") || isLikelyMediaURL(url) else { return nil }
 
             let fileURL = assetsDirectory
                 .appendingPathComponent(Self.cacheKey(for: url))
@@ -328,14 +331,17 @@ struct WebPageCache: Sendable {
         case "image/webp": return "webp"
         case "image/avif": return "avif"
         case "image/svg+xml": return "svg"
+        case "video/mp4": return "mp4"
+        case "video/webm": return "webm"
+        case "video/quicktime": return "mov"
         default:
             let ext = url.pathExtension.lowercased()
             return ext.isEmpty ? "asset" : ext
         }
     }
 
-    private func isLikelyImageURL(_ url: URL) -> Bool {
-        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].contains(url.pathExtension.lowercased())
+    private func isLikelyMediaURL(_ url: URL) -> Bool {
+        ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "mp4", "m4v", "mov", "webm"].contains(url.pathExtension.lowercased())
     }
 }
 
@@ -802,6 +808,11 @@ extension String {
             .removingSrcsetFromLocalMediaTags()
     }
 
+    func preparedForRemoteMediaDisplay() -> String {
+        replacingLocalMediaTagsWithOriginals()
+            .removingPictureSources()
+    }
+
     private var mediaTags: [String] {
         mediaTagMatches.compactMap { match in
             guard let range = Range(match.range, in: self) else { return nil }
@@ -817,7 +828,29 @@ extension String {
     }
 
     private func removingPictureSources() -> String {
-        replacingOccurrences(of: "<source\\b[^>]*>", with: "", options: [.regularExpression, .caseInsensitive])
+        guard let regex = try? NSRegularExpression(
+            pattern: "<picture\\b[^>]*>[\\s\\S]*?</picture>",
+            options: [.caseInsensitive]
+        ) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let picture = String(self[originalRange])
+                .replacingOccurrences(
+                    of: "<source\\b[^>]*>",
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            result.replaceSubrange(range, with: picture)
+        }
+        return result
     }
 
     private func removingSrcsetFromLocalMediaTags() -> String {
@@ -841,6 +874,19 @@ extension String {
                     with: "",
                     options: [.regularExpression, .caseInsensitive]
                 )
+            result.replaceSubrange(tagRange, with: tag)
+        }
+        return result
+    }
+
+    private func replacingLocalMediaTagsWithOriginals() -> String {
+        var result = self
+        for match in mediaTagMatches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let tag = String(self[originalRange]).replacingLocalMediaReferencesWithOriginals()
             result.replaceSubrange(tagRange, with: tag)
         }
         return result
@@ -886,14 +932,53 @@ extension String {
         let matches = regex.matches(in: result, range: NSRange(result.startIndex..<result.endIndex, in: result))
         for match in matches.reversed() {
             let valueIndex = match.range(at: 3).location != NSNotFound ? 3 : 4
-            guard let valueRange = Range(match.range(at: valueIndex), in: result) else { continue }
+            guard let valueRange = Range(match.range(at: valueIndex), in: result),
+                  let attrRange = Range(match.range(at: 1), in: result) else { continue }
+            let attrName = String(result[attrRange])
             let rawValue = String(result[valueRange])
             guard let remoteURL = Self.resolvedMediaURL(rawValue, baseURL: baseURL),
                   let localURL = localURLs[remoteURL] else {
                 continue
             }
             result.replaceSubrange(valueRange, with: localURL.absoluteString)
+            result = result.addingOriginalMediaAttribute(attributeName: attrName, originalURL: remoteURL.absoluteString)
         }
+        return result
+    }
+
+    private func replacingLocalMediaReferencesWithOriginals() -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\b(src|poster)=(\"file://[^\"]*\"|'file://[^']*')", options: [.caseInsensitive]) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let valueRange = Range(match.range(at: 2), in: result),
+                  let attrRange = Range(match.range(at: 1), in: result) else {
+                continue
+            }
+            let attrName = String(result[attrRange])
+            let dataName = "data-bookmarked-original-\(attrName.lowercased())"
+            guard let original = attributeValue(dataName), !original.isEmpty else {
+                continue
+            }
+            result.replaceSubrange(valueRange, with: "\"\(original.escapedHTML)\"")
+        }
+        return result
+    }
+
+    private func addingOriginalMediaAttribute(attributeName: String, originalURL: String) -> String {
+        let dataName = "data-bookmarked-original-\(attributeName.lowercased())"
+        guard attributeValue(dataName) == nil,
+              let closeIndex = lastIndex(of: ">") else {
+            return self
+        }
+
+        var result = self
+        let beforeClose = closeIndex > startIndex ? index(before: closeIndex) : closeIndex
+        let targetIndex = self[beforeClose] == "/" ? beforeClose : closeIndex
+        result.insert(contentsOf: #" \#(dataName)="\#(originalURL.escapedHTML)""#, at: targetIndex)
         return result
     }
 

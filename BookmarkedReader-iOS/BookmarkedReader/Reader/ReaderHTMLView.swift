@@ -60,6 +60,7 @@ struct ReaderHTMLView: UIViewRepresentable {
     }
 
     static func documentHTML(title: String, html: String, preferences: ReaderFontPreferences) -> String {
+        let displayHTML = html.preparedForRemoteReaderMediaDisplay()
         var fontFaces = preferences.choice == .serif ? ReaderFonts.fontFaceCSS : ""
         let hasCode = html.range(of: "<code", options: .caseInsensitive) != nil
             || html.range(of: "<pre", options: .caseInsensitive) != nil
@@ -156,7 +157,7 @@ struct ReaderHTMLView: UIViewRepresentable {
         .katex *, .katex-display * { max-width: none; box-sizing: content-box; }
         </style>
         </head>
-        <body><main>\(html)</main>
+        <body><main>\(displayHTML)</main>
         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
         <script>
@@ -242,10 +243,100 @@ struct ReaderHTMLView: UIViewRepresentable {
 }
 
 extension String {
+    fileprivate func preparedForRemoteReaderMediaDisplay() -> String {
+        replacingLocalReaderMediaTagsWithOriginals()
+            .removingPictureSourcesForReader()
+    }
+
     var escapedForHTML: String {
         replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    private var readerMediaTagMatches: [NSTextCheckingResult] {
+        guard let regex = try? NSRegularExpression(pattern: "<(?:img|source|video|amp-img)\\b[^>]*>", options: [.caseInsensitive]) else {
+            return []
+        }
+        return regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+    }
+
+    private func replacingLocalReaderMediaTagsWithOriginals() -> String {
+        var result = self
+        for match in readerMediaTagMatches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let tag = String(self[originalRange]).replacingLocalReaderMediaReferencesWithOriginals()
+            result.replaceSubrange(tagRange, with: tag)
+        }
+        return result
+    }
+
+    private func replacingLocalReaderMediaReferencesWithOriginals() -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\b(src|poster)=(\"file://[^\"]*\"|'file://[^']*')", options: [.caseInsensitive]) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let valueRange = Range(match.range(at: 2), in: result),
+                  let attrRange = Range(match.range(at: 1), in: result) else {
+                continue
+            }
+            let attrName = String(result[attrRange])
+            guard let original = attributeValue("data-bookmarked-original-\(attrName.lowercased())"),
+                  !original.isEmpty else {
+                continue
+            }
+            result.replaceSubrange(valueRange, with: "\"\(original.escapedForHTML)\"")
+        }
+        return result
+    }
+
+    private func removingPictureSourcesForReader() -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<picture\\b[^>]*>[\\s\\S]*?</picture>",
+            options: [.caseInsensitive]
+        ) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let picture = String(self[originalRange])
+                .replacingOccurrences(
+                    of: "<source\\b[^>]*>",
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            result.replaceSubrange(range, with: picture)
+        }
+        return result
+    }
+
+    private func attributeValue(_ name: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\b\(escaped)=(\"([^\"]*)\"|'([^']*)')",
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range) else { return nil }
+        let valueRange = match.range(at: 2).location != NSNotFound ? match.range(at: 2) : match.range(at: 3)
+        guard let range = Range(valueRange, in: self) else { return nil }
+        return String(self[range])
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
     }
 }

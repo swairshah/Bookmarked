@@ -37,7 +37,9 @@ done
 # --- macOS ---------------------------------------------------------------------
 if [ "$DO_MAC" = 1 ]; then
     echo -e "${BOLD}${GREEN}=== [1/2] macOS — build${NC}"
-    ./scripts/build-app.sh
+    # This is your local install, so default to the licensed "Reader" serif.
+    # (The distributable DMG is built by scripts/release.sh, which ships Iowan Old Style.)
+    READER_FONTS="${READER_FONTS:-1}" ./scripts/build-app.sh
     if [ "$RELAUNCH" = 1 ]; then
         echo -e "${YELLOW}Relaunching macOS app...${NC}"
         pkill -f "Bookmarked.app" 2>/dev/null || true

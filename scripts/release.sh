@@ -25,7 +25,6 @@ ENTITLEMENTS="Sources/BookmarkedApp/Bookmarked.entitlements"
 
 APP_PATH=".build/$APP_NAME.app"
 CLI_PATH="$APP_PATH/Contents/MacOS/bookmarkedctl"
-RES_BUNDLE="$APP_PATH/Contents/Resources/${APP_NAME}_${APP_NAME}.bundle"
 
 SKIP_NOTARIZE=false
 [ "${1:-}" = "--skip-notarize" ] && SKIP_NOTARIZE=true
@@ -46,11 +45,12 @@ echo -e "${YELLOW}Building app...${NC}"
 rm -rf dist; mkdir -p dist
 ./scripts/build-app.sh
 
-# --- 2. Sign with Developer ID + hardened runtime (inside-out) ----------------
+# --- 2. Sign with Developer ID + hardened runtime -----------------------------
 echo -e "${YELLOW}Signing...${NC}"
-[ -d "$RES_BUNDLE" ] && codesign --force --options runtime --sign "$SIGNING_IDENTITY" "$RES_BUNDLE"
+# SwiftPM's resource ".bundle" is a plain resource directory, not a signable
+# CFBundle. It is sealed by the outer app signature.
 [ -f "$CLI_PATH" ] && codesign --force --options runtime --sign "$SIGNING_IDENTITY" "$CLI_PATH"
-codesign --force --deep --options runtime \
+codesign --force --options runtime \
     --sign "$SIGNING_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     "$APP_PATH"

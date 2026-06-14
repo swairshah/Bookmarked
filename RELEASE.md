@@ -4,6 +4,30 @@ Public macOS distribution is **Developer ID + notarization**, shipped as a DMG v
 your Homebrew tap. (Not the Mac App Store — the sandbox it requires would break
 the Accessibility / Apple Events capture.)
 
+## Fonts: shipping vs. local
+
+The reader serif has two flavors, selected by the `READER_FONTS` compile flag:
+
+- **Shipping (flag off — the default):** the built-in **Iowan Old Style** serif.
+  No font files are bundled, so the trial-licensed Reader fonts are never
+  redistributed. `scripts/release.sh` and the iOS TestFlight build use this.
+- **Local / personal (flag on):** the licensed **Reader** serif, which you may use
+  under your personal license. `release-all.sh` builds the Mac app this way by
+  default, and the iOS Debug build (`run.sh`) does too.
+
+On **macOS**, the local build relies on Reader being installed system-wide — install
+it once via Font Book (you have the license):
+
+```bash
+cp BookmarkedReader-iOS/BookmarkedReader/Fonts/Reader-*.ttf ~/Library/Fonts/
+```
+
+The Reader `.ttf` files are git-ignored (`**/Reader-*.ttf`) so they can't be
+committed by accident. To force a flavor explicitly:
+`READER_FONTS=1 ./scripts/build-app.sh` (local) or plain `./scripts/release.sh`
+(shipping). The iOS release script additionally moves any `Reader-*.ttf` aside for
+the duration of the archive as a belt-and-suspenders guard.
+
 ## 1. Bump the version
 
 Edit `scripts/build-app.sh` → `VERSION="x.y.z"` (sets `CFBundleShortVersionString`).
