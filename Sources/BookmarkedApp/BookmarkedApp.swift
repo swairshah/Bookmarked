@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import Carbon
 import BookmarkedClient
 
 @main
@@ -102,7 +103,7 @@ struct BookmarkedApp: App {
                 Divider()
 
                 Button("Increase Font Size") {
-                    increaseReaderFontAction?()
+                    NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": 1.0])
                 }
                 .keyboardShortcut(
                     settings.shortcut(for: .increaseFontSize).keyEquivalentValue,
@@ -110,7 +111,7 @@ struct BookmarkedApp: App {
                 )
 
                 Button("Decrease Font Size") {
-                    decreaseReaderFontAction?()
+                    NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": -1.0])
                 }
                 .keyboardShortcut(
                     settings.shortcut(for: .decreaseFontSize).keyEquivalentValue,
@@ -172,11 +173,21 @@ extension FocusedValues {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager: HotKeyManager?
     private var broker: BookmarkedBroker?
+    private var peerSync: PeerSync?
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let launchStart = Date()
+        func mark(_ label: String) {
+            NSLog("Bookmarked startup: \(label) at +\(Int(Date().timeIntervalSince(launchStart) * 1000)) ms")
+        }
+
         NSApp.setActivationPolicy(.accessory)
+        BundledFonts.register()
+        mark("fonts kicked off")
         CaptureService.promptForAccessibilityIfNeeded()
+        mark("accessibility checked")
+        registerAppURLHandler()
 
         do {
             broker = try BookmarkedBroker(port: BookmarkedDefaults.brokerPort, store: BookmarkStore.shared)
@@ -184,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSLog("Bookmarked broker: could not start: \(error)")
         }
+        mark("store loaded + broker started")
 
         hotKeyManager = HotKeyManager {
             Task { @MainActor in
@@ -196,9 +208,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.registerCaptureHotKey()
             }
             .store(in: &cancellables)
+        mark("hotkeys registered")
+
+        peerSync = PeerSync(store: BookmarkStore.shared)
+        peerSync?.start()
 
         DispatchQueue.main.async {
             MainWindowController.shared.show()
+            mark("main window shown")
         }
     }
 
@@ -207,10 +224,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Task { @MainActor in
+            urls.forEach(handleAppURL)
+        }
+    }
+
     @MainActor
     private func registerCaptureHotKey() {
         let shortcut = BookmarkedSettings.shared.shortcut(for: .captureCurrentPage)
         hotKeyManager?.register(shortcut: shortcut)
+    }
+
+    private func registerAppURLHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+        guard let rawURL = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: rawURL) else {
+            return
+        }
+
+        Task { @MainActor in
+            handleAppURL(url)
+        }
+    }
+
+    @MainActor
+    private func handleAppURL(_ url: URL) {
+        guard let idOrPrefix = BookmarkedDeepLink.idOrPrefix(from: url) else { return }
+
+        guard let item = BookmarkStore.shared.resolveItem(idOrPrefix: idOrPrefix) else {
+            BookmarkStore.shared.statusMessage = "Bookmark not found for app link"
+            MainWindowController.shared.show()
+            return
+        }
+
+        MainWindowController.shared.show(select: item.id)
     }
 }
 

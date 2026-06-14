@@ -10,29 +10,26 @@ struct ReaderHTMLView: NSViewRepresentable {
     var onEditSource: (() -> Void)?
     var onElementRemoved: ((String) -> Void)?
 
-    func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.suppressesIncrementalRendering = false
-        configuration.userContentController.add(context.coordinator, name: "readerEdit")
-        let view = ReaderWebView(frame: .zero, configuration: configuration)
-        view.setValue(false, forKey: "drawsBackground")
-        view.onEditSource = { context.coordinator.onEditSource?() }
-        context.coordinator.webView = view
-        return view
-    }
-
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.webView = nsView
-        context.coordinator.onEditSource = onEditSource
-        context.coordinator.onElementRemoved = onElementRemoved
+    static func documentHTML(
+        title: String,
+        html: String,
+        fontPreferences: ReaderFontPreferences,
+        fontScale: Double
+    ) -> String {
         let displayHTML = html.preparedForLocalMediaDisplay()
-        let document = """
+        let hasCode = html.range(of: "<code", options: .caseInsensitive) != nil
+            || html.range(of: "<pre", options: .caseInsensitive) != nil
+        let codeFaces = hasCode ? BundledFonts.codeFontFaceCSS : ""
+        return """
         <!doctype html>
         <html>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>\(title.escapedHTML)</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
         <style>
+        \(codeFaces)
         :root { color-scheme: light dark; }
         body {
           margin: 0;
@@ -61,7 +58,13 @@ struct ReaderHTMLView: NSViewRepresentable {
           max-width: 100%;
           box-sizing: border-box;
         }
-        main [style] {
+        main article[style],
+        main section[style],
+        main div[style],
+        main p[style],
+        main figure[style],
+        main img[style],
+        main video[style] {
           position: static !important;
           transform: none !important;
           inset: auto !important;
@@ -84,30 +87,61 @@ struct ReaderHTMLView: NSViewRepresentable {
           border-radius: 8px;
         }
         figure img { display: block; margin: 0 auto; }
+        pre, pre *, code, code *, kbd, samp {
+          font-family: "Google Sans Code", \(fontPreferences.cssMonoFontFamily) !important;
+        }
+        pre, code, kbd, samp { font-size: 0.92em; }
         pre {
           overflow: auto;
           padding: 14px 16px;
           border-radius: 8px;
           background: color-mix(in srgb, CanvasText 8%, transparent);
-          font-size: \(fontPreferences.cssCodeFontSize);
+          line-height: 1.5;
         }
         code {
-          font-family: \(fontPreferences.cssMonoFontFamily);
-          font-size: \(fontPreferences.cssCodeFontSize);
           background: color-mix(in srgb, CanvasText 8%, transparent);
           padding: 0.12em 0.28em;
           border-radius: 4px;
         }
-        pre code { background: transparent; padding: 0; }
+        pre code { background: transparent; padding: 0; font-size: 1em; }
         table { border-collapse: collapse; width: 100%; margin: 1em 0; }
         th, td { border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding: 0.45em 0.6em; text-align: left; }
+        .katex { font-size: 1.02em; color: CanvasText; }
+        .katex-display {
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 0.15em 0 0.35em;
+          margin: 1.2em 0;
+        }
+        .katex *,
+        .katex-display * {
+          max-width: none;
+          box-sizing: content-box;
+        }
         </style>
         </head>
         <body><main>\(displayHTML)</main>
+        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
         <script>
         (() => {
           const selector = "figure,picture,img,video,pre,blockquote,table,li,p,h1,h2,h3,h4,h5,h6,section,article";
           let pendingNode = null;
+
+          function renderReaderMath() {
+            const root = document.querySelector("main");
+            if (!root || typeof renderMathInElement !== "function") return;
+            renderMathInElement(root, {
+              delimiters: [
+                { left: "$$", right: "$$", display: true },
+                { left: "\\\\[", right: "\\\\]", display: true },
+                { left: "$", right: "$", display: false },
+                { left: "\\\\(", right: "\\\\)", display: false }
+              ],
+              ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+              throwOnError: false
+            });
+          }
 
           function removableElement(target) {
             const main = document.querySelector("main");
@@ -132,11 +166,44 @@ struct ReaderHTMLView: NSViewRepresentable {
             pendingNode = null;
             window.webkit.messageHandlers.readerEdit.postMessage(document.querySelector("main").innerHTML);
           };
+
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", renderReaderMath);
+          } else {
+            renderReaderMath();
+          }
         })();
         </script>
         </body>
         </html>
         """
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.suppressesIncrementalRendering = false
+        configuration.userContentController.add(context.coordinator, name: "readerEdit")
+        let view = ReaderWebView(frame: .zero, configuration: configuration)
+        view.setValue(false, forKey: "drawsBackground")
+        view.onEditSource = { context.coordinator.onEditSource?() }
+        context.coordinator.webView = view
+        return view
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.webView = nsView
+        context.coordinator.onEditSource = onEditSource
+        context.coordinator.onElementRemoved = onElementRemoved
+        // Build the document at a fixed base scale so it does NOT change when the
+        // reader font size changes — the size is applied with pageZoom instead,
+        // which is instant and avoids reloading the whole WebView (and re-parsing
+        // the embedded font) on every Cmd+/Cmd-.
+        let document = Self.documentHTML(
+            title: title,
+            html: html,
+            fontPreferences: fontPreferences,
+            fontScale: 1
+        )
 
         if context.coordinator.lastHTML != document {
             context.coordinator.lastHTML = document
@@ -149,6 +216,11 @@ struct ReaderHTMLView: NSViewRepresentable {
             } else {
                 nsView.loadHTMLString(document, baseURL: baseURL)
             }
+        }
+
+        let zoom = max(0.5, CGFloat(fontScale))
+        if abs(nsView.pageZoom - zoom) > 0.001 {
+            nsView.pageZoom = zoom
         }
     }
 

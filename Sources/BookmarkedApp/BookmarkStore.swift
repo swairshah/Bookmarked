@@ -32,7 +32,10 @@ final class BookmarkStore: ObservableObject {
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
+        let loadStart = Date()
         load()
+        NSLog("Bookmarked startup: loaded \(items.count) bookmarks in \(Int(Date().timeIntervalSince(loadStart) * 1000)) ms")
+        ICloudMirror.sync(items)   // push the current library to iCloud on launch
     }
 
     var recentItems: [BookmarkItem] {
@@ -406,6 +409,9 @@ final class BookmarkStore: ObservableObject {
         }
         saveWorkItem = work
         ioQueue.asyncAfter(deadline: .now() + 0.2, execute: work)
+
+        // Mirror per-bookmark files into iCloud for incremental cross-device sync.
+        ICloudMirror.sync(snapshot)
     }
 
     private static let searchDateFormatter: DateFormatter = {

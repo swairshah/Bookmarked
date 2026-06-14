@@ -20,7 +20,7 @@ let package = Package(
             name: "Bookmarked",
             dependencies: ["BookmarkedClient"],
             path: "Sources/BookmarkedApp",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "Bookmarked.entitlements"],
             resources: [
                 .process("Assets.xcassets"),
                 .copy("Resources")

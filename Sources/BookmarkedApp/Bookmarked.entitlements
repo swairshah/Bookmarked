@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Not sandboxed: needs Accessibility + Apple Events to capture browser tabs. -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    <!-- Control browsers (Safari/Chrome/etc.) via Apple Events under the hardened runtime. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <!-- Fetch page content, favicons, KaTeX. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Advertise the local-network sync service to nearby iOS devices. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

@@ -20,6 +20,7 @@ COMMANDS:
         --limit <N>             Limit result count
 
     get <id>                    Show bookmark metadata
+    link <id>                   Print title, web/file link, and app link
     read <id>                   Print indexed reader text
         --format <format>       text, html, note, summary, or url
 
@@ -33,11 +34,13 @@ COMMANDS:
 GLOBAL OPTIONS:
     --host <HOST>               Broker host (default: 127.0.0.1)
     --port <PORT>               Broker port (default: \(BookmarkedDefaults.brokerPort))
+    --links                     Include web/file and app links in text output
     --json                      Output machine-readable JSON
     -q, --quiet                 Suppress non-error output
     -h, --help                  Show this help
 
 IDs can be either a full UUID or a short prefix.
+search/get --json include appLink. Agents should return title, url or fileURL, and appLink.
 """
 
 struct ParsedArgs {
@@ -52,6 +55,7 @@ struct ParsedArgs {
     var note: String?
     var format: String?
     var json = false
+    var links = false
     var quiet = false
     var help = false
 }
@@ -108,6 +112,8 @@ func parseArgs() -> ParsedArgs {
             if i < args.count { parsed.format = args[i] }
         case "--json":
             parsed.json = true
+        case "--links":
+            parsed.links = true
         case "-q", "--quiet":
             parsed.quiet = true
         default:
@@ -156,16 +162,32 @@ func printJSON<T: Encodable>(_ value: T) {
     }
 }
 
-func printRow(index: Int?, item: BookmarkedBookmark) {
+func printRow(index: Int?, item: BookmarkedBookmark, includeLinks: Bool = false) {
     let indexText = index.map { String(format: "%2d ", $0) } ?? ""
     var suffix = ""
-    if let url = item.url ?? item.fileURL, !url.isEmpty {
+    if !includeLinks, let url = item.url ?? item.fileURL, !url.isEmpty {
         suffix += "  \(url)"
     }
     if !item.tags.isEmpty {
         suffix += "  [\(item.tags.joined(separator: ", "))]"
     }
     print("\(indexText)\(item.shortId)  \(item.title)  \(item.kind)\(suffix)")
+    if includeLinks {
+        printLinks(item: item, indented: true)
+    }
+}
+
+func printLinks(item: BookmarkedBookmark, indented: Bool = false) {
+    let prefix = indented ? "     " : ""
+    if !indented {
+        print(item.title)
+    }
+    if let url = item.url, !url.isEmpty {
+        print("\(prefix)web: \(url)")
+    } else if let fileURL = item.fileURL, !fileURL.isEmpty {
+        print("\(prefix)file: \(fileURL)")
+    }
+    print("\(prefix)app: \(item.resolvedAppLink)")
 }
 
 func run() async {
@@ -212,14 +234,14 @@ func run() async {
         ))
         if !response.ok { die(response.error ?? "search failed") }
         if args.json {
-            printJSON(response)
+            printJSON(response.withResolvedAppLinks())
         } else {
             let items = response.items ?? []
             if items.isEmpty {
                 if !args.quiet { print("no bookmarks") }
             } else {
                 for (index, item) in items.enumerated() {
-                    printRow(index: index, item: item)
+                    printRow(index: index, item: item, includeLinks: args.links)
                 }
             }
         }
@@ -229,9 +251,9 @@ func run() async {
         let response = await send(BookmarkedRequest(type: "get", id: id, idPrefix: id))
         if !response.ok { die(response.error ?? "get failed") }
         if args.json {
-            printJSON(response)
+            printJSON(response.withResolvedAppLinks())
         } else if let item = response.item {
-            printRow(index: nil, item: item)
+            printRow(index: nil, item: item, includeLinks: args.links)
             print("  id:       \(item.id.uuidString)")
             if let creator = item.creator { print("  creator:  \(creator)") }
             if let summary = item.summary { print("  summary:  \(summary)") }
@@ -240,12 +262,22 @@ func run() async {
             print("  updated:  \(item.updatedAt)")
         }
 
+    case "link", "links":
+        guard let id = args.positionals.first else { die("link requires an id") }
+        let response = await send(BookmarkedRequest(type: "get", id: id, idPrefix: id))
+        if !response.ok { die(response.error ?? "link failed") }
+        if args.json {
+            printJSON(response.withResolvedAppLinks())
+        } else if let item = response.item {
+            printLinks(item: item)
+        }
+
     case "read":
         guard let id = args.positionals.first else { die("read requires an id") }
         let response = await send(BookmarkedRequest(type: "read", id: id, idPrefix: id, format: args.format))
         if !response.ok { die(response.error ?? "read failed") }
         if args.json {
-            printJSON(response)
+            printJSON(response.withResolvedAppLinks())
         } else if let content = response.content {
             print(content)
         }
@@ -260,7 +292,7 @@ func run() async {
         let response = await send(BookmarkedRequest(type: "note", id: id, idPrefix: id, note: text))
         if !response.ok { die(response.error ?? "note failed") }
         if args.json {
-            printJSON(response)
+            printJSON(response.withResolvedAppLinks())
         } else if !args.quiet, let item = response.item {
             print("noted: \(item.title)")
         }
@@ -275,7 +307,7 @@ func run() async {
         let response = await send(BookmarkedRequest(type: "tag", id: id, idPrefix: id, tag: tag, tagAction: action))
         if !response.ok { die(response.error ?? "tag failed") }
         if args.json {
-            printJSON(response)
+            printJSON(response.withResolvedAppLinks())
         } else if !args.quiet, let item = response.item {
             print("tags: \(item.tags.joined(separator: ", "))")
         }

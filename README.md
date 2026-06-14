@@ -24,6 +24,7 @@ Bookmarked exposes a local CLI for agents and scripts while the app is running:
 
 ```bash
 swift run bookmarked search "oauth" --json
+swift run bookmarked link 7602A4C8
 swift run bookmarked read 7602A4C8 --format text
 swift run bookmarked note 7602A4C8 "Follow up on this."
 swift run bookmarked tag 7602A4C8 add research
@@ -31,6 +32,9 @@ swift run bookmarked tag 7602A4C8 add research
 
 The CLI talks to the running app over a loopback-only local broker, so bookmark
 changes update the same in-memory library the UI is showing.
+Search and get JSON include an `appLink` such as
+`bookmarked://open/7602A4C8-...`, which opens the bookmark inside Bookmarked on
+machines where the app is installed.
 
 ## Build App Bundle
 

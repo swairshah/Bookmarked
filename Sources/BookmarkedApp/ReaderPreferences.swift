@@ -38,7 +38,7 @@ enum ReaderFontChoice: String, CaseIterable, Identifiable {
 struct ReaderFontPreferences: Equatable {
     static let defaultSerifName = "New York"
     static let defaultSansName = "SF Pro Text"
-    static let defaultMonoName = "SF Mono"
+    static let defaultMonoName = "Google Sans Code"
     static let defaultArticleSize = 18.0
     static let defaultInterfaceSize = 13.0
     static let defaultCodeSize = 13.0

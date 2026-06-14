@@ -36,6 +36,17 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>Bookmarked</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.swair.bookmarked</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>bookmarked</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -52,6 +63,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>Bookmarked reads the current browser tab so it can save and index the page you asked to capture.</string>
     <key>NSAccessibilityUsageDescription</key>
     <string>Bookmarked uses Accessibility to detect the frontmost app for the global capture shortcut.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Bookmarked syncs your library with your iPhone/iPad over the local network.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_bkmkd-sync._tcp</string>
+        <string>_bkmkd-sync._udp</string>
+    </array>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

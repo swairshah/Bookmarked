@@ -1423,6 +1423,11 @@ struct GlobalSettingsView: View {
                 .tabItem {
                     Label("Fonts", systemImage: "textformat")
                 }
+
+            SyncSettingsPane()
+                .tabItem {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
         }
         .frame(width: fillsAvailableSpace ? nil : 620, height: fillsAvailableSpace ? nil : 520)
         .frame(

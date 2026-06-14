@@ -253,6 +253,7 @@ private extension BookmarkItem {
             kind: kind.rawValue,
             url: url?.absoluteString,
             fileURL: fileURL?.path,
+            appLink: BookmarkedLinks.appLink(for: id),
             creator: creator,
             sourceApp: sourceApp,
             summary: summary,

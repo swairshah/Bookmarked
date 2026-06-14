@@ -125,6 +125,50 @@ final class BookmarkedTests: XCTestCase {
         XCTAssertFalse(content.text.contains("Stay in the loop"))
     }
 
+    func testHTMLExtractorPreservesLatexMathForReaderRendering() {
+        let html = """
+        <!doctype html>
+        <html><body>
+        <article>
+          <p>Beyond unigram: $N$-gram diffusion.</p>
+          $$
+          p(x_i | x_{i-k :i-1}, x_{i+1:i+k}) = \\frac{\\mathrm{count}(x_{i-k:i+k})}{\\mathrm{count}(x_{i-k :i-1}, x_{i+1:i+k})}
+          $$
+          <p>where $\\mathrm{count}(\\cdot)$ denotes the count.</p>
+        </article>
+        </body></html>
+        """
+
+        let content = HTMLContentExtractor.extract(
+            from: html,
+            url: URL(string: "https://dimitri.ml/posts/why-diffusion-language-models-are-the-future/")!
+        )
+
+        XCTAssertTrue(content.html?.contains(#"$N$-gram"#) ?? false)
+        XCTAssertTrue(content.html?.contains(#"$$"#) ?? false)
+        XCTAssertTrue(content.html?.contains(#"\frac{\mathrm{count}"#) ?? false)
+        XCTAssertTrue(content.html?.contains(#"$\mathrm{count}(\cdot)$"#) ?? false)
+    }
+
+    func testReaderHTMLDocumentLoadsKatexAutoRenderer() {
+        let document = ReaderHTMLView.documentHTML(
+            title: "Math Page",
+            html: #"<p>Inline $N$ and display:</p>$$ x_i = \frac{1}{2} $$<pre><code>$not_math$</code></pre>"#,
+            fontPreferences: .defaults,
+            fontScale: 1
+        )
+
+        XCTAssertTrue(document.contains("katex@0.16.10/dist/katex.min.css"))
+        XCTAssertTrue(document.contains("katex@0.16.10/dist/katex.min.js"))
+        XCTAssertTrue(document.contains("auto-render.min.js"))
+        XCTAssertTrue(document.contains(#"{ left: "$$", right: "$$", display: true }"#))
+        XCTAssertTrue(document.contains(#"{ left: "$", right: "$", display: false }"#))
+        XCTAssertTrue(document.contains(#"ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]"#))
+        XCTAssertTrue(document.contains("main article[style]"))
+        XCTAssertTrue(document.contains(".katex *"))
+        XCTAssertFalse(document.contains("main [style] {"))
+    }
+
     func testReaderBlocksParseMarkdownStructure() {
         let blocks = ReaderBlock.parse("# Title\n\nIntro paragraph with **bold**.\n\n- One\n- Two")
 

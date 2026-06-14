@@ -7,6 +7,7 @@ public struct BookmarkedBookmark: Codable, Identifiable, Hashable, Sendable {
     public var kind: String
     public var url: String?
     public var fileURL: String?
+    public var appLink: String?
     public var creator: String?
     public var sourceApp: String?
     public var summary: String?
@@ -24,6 +25,7 @@ public struct BookmarkedBookmark: Codable, Identifiable, Hashable, Sendable {
         kind: String,
         url: String? = nil,
         fileURL: String? = nil,
+        appLink: String? = nil,
         creator: String? = nil,
         sourceApp: String? = nil,
         summary: String? = nil,
@@ -40,6 +42,7 @@ public struct BookmarkedBookmark: Codable, Identifiable, Hashable, Sendable {
         self.kind = kind
         self.url = url
         self.fileURL = fileURL
+        self.appLink = appLink ?? BookmarkedLinks.appLink(for: id)
         self.creator = creator
         self.sourceApp = sourceApp
         self.summary = summary
@@ -130,6 +133,13 @@ public struct BookmarkedResponse: Codable, Sendable {
     public static func failure(_ message: String) -> BookmarkedResponse {
         BookmarkedResponse(ok: false, error: message)
     }
+
+    public func withResolvedAppLinks() -> BookmarkedResponse {
+        var response = self
+        response.item = response.item?.withResolvedAppLink()
+        response.items = response.items?.map { $0.withResolvedAppLink() }
+        return response
+    }
 }
 
 public enum BookmarkedError: Error, LocalizedError {
@@ -152,6 +162,14 @@ public enum BookmarkedError: Error, LocalizedError {
 public enum BookmarkedDefaults {
     public static let brokerHost = "127.0.0.1"
     public static let brokerPort = 27183
+}
+
+public enum BookmarkedLinks {
+    public static let appScheme = "bookmarked"
+
+    public static func appLink(for id: UUID) -> String {
+        "\(appScheme)://open/\(id.uuidString)"
+    }
 }
 
 public final class BookmarkedClient: @unchecked Sendable {
@@ -265,5 +283,15 @@ public final class BookmarkedClient: @unchecked Sendable {
 public extension BookmarkedBookmark {
     var shortId: String {
         String(id.uuidString.prefix(8))
+    }
+
+    var resolvedAppLink: String {
+        appLink ?? BookmarkedLinks.appLink(for: id)
+    }
+
+    func withResolvedAppLink() -> BookmarkedBookmark {
+        var bookmark = self
+        bookmark.appLink = resolvedAppLink
+        return bookmark
     }
 }
