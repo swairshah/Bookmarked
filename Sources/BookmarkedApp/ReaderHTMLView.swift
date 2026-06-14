@@ -182,6 +182,7 @@ struct ReaderHTMLView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.userContentController.add(context.coordinator, name: "readerEdit")
         let view = ReaderWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")

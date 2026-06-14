@@ -805,12 +805,14 @@ extension String {
 
     func preparedForLocalMediaDisplay() -> String {
         removingPictureSources()
+            .preparingVideoTagsForManualPlayback()
             .removingSrcsetFromLocalMediaTags()
     }
 
     func preparedForRemoteMediaDisplay() -> String {
         replacingLocalMediaTagsWithOriginals()
             .removingPictureSources()
+            .preparingVideoTagsForManualPlayback()
     }
 
     private var mediaTags: [String] {
@@ -874,6 +876,24 @@ extension String {
                     with: "",
                     options: [.regularExpression, .caseInsensitive]
                 )
+            result.replaceSubrange(tagRange, with: tag)
+        }
+        return result
+    }
+
+    private func preparingVideoTagsForManualPlayback() -> String {
+        guard let regex = try? NSRegularExpression(pattern: "<video\\b[^>]*>", options: [.caseInsensitive]) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let tag = String(self[originalRange]).videoTagPreparedForManualPlayback()
             result.replaceSubrange(tagRange, with: tag)
         }
         return result
@@ -979,6 +999,29 @@ extension String {
         let beforeClose = closeIndex > startIndex ? index(before: closeIndex) : closeIndex
         let targetIndex = self[beforeClose] == "/" ? beforeClose : closeIndex
         result.insert(contentsOf: #" \#(dataName)="\#(originalURL.escapedHTML)""#, at: targetIndex)
+        return result
+    }
+
+    private func videoTagPreparedForManualPlayback() -> String {
+        let withoutAutoplay = replacingOccurrences(
+            of: "\\s+autoplay\\b(?:=(\"[^\"]*\"|'[^']*'|[^\\s>]+))?",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        guard withoutAutoplay.range(
+            of: "\\scontrols\\b(?:=(\"[^\"]*\"|'[^']*'|[^\\s>]+))?",
+            options: [.regularExpression, .caseInsensitive]
+        ) == nil else {
+            return withoutAutoplay
+        }
+        guard let closeIndex = withoutAutoplay.lastIndex(of: ">") else {
+            return withoutAutoplay
+        }
+
+        var result = withoutAutoplay
+        let beforeClose = closeIndex > result.startIndex ? result.index(before: closeIndex) : closeIndex
+        let targetIndex = result[beforeClose] == "/" ? beforeClose : closeIndex
+        result.insert(contentsOf: " controls", at: targetIndex)
         return result
     }
 

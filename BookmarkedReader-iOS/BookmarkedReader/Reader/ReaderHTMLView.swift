@@ -19,6 +19,7 @@ struct ReaderHTMLView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeScroll(of: webView.scrollView)
@@ -246,6 +247,7 @@ extension String {
     fileprivate func preparedForRemoteReaderMediaDisplay() -> String {
         replacingLocalReaderMediaTagsWithOriginals()
             .removingPictureSourcesForReader()
+            .preparingReaderVideoTagsForManualPlayback()
     }
 
     var escapedForHTML: String {
@@ -323,6 +325,24 @@ extension String {
         return result
     }
 
+    private func preparingReaderVideoTagsForManualPlayback() -> String {
+        guard let regex = try? NSRegularExpression(pattern: "<video\\b[^>]*>", options: [.caseInsensitive]) else {
+            return self
+        }
+
+        var result = self
+        let matches = regex.matches(in: self, range: NSRange(startIndex..<endIndex, in: self))
+        for match in matches.reversed() {
+            guard let tagRange = Range(match.range, in: result),
+                  let originalRange = Range(match.range, in: self) else {
+                continue
+            }
+            let tag = String(self[originalRange]).readerVideoTagPreparedForManualPlayback()
+            result.replaceSubrange(tagRange, with: tag)
+        }
+        return result
+    }
+
     private func attributeValue(_ name: String) -> String? {
         let escaped = NSRegularExpression.escapedPattern(for: name)
         guard let regex = try? NSRegularExpression(
@@ -338,5 +358,28 @@ extension String {
         return String(self[range])
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&quot;", with: "\"")
+    }
+
+    private func readerVideoTagPreparedForManualPlayback() -> String {
+        let withoutAutoplay = replacingOccurrences(
+            of: "\\s+autoplay\\b(?:=(\"[^\"]*\"|'[^']*'|[^\\s>]+))?",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        guard withoutAutoplay.range(
+            of: "\\scontrols\\b(?:=(\"[^\"]*\"|'[^']*'|[^\\s>]+))?",
+            options: [.regularExpression, .caseInsensitive]
+        ) == nil else {
+            return withoutAutoplay
+        }
+        guard let closeIndex = withoutAutoplay.lastIndex(of: ">") else {
+            return withoutAutoplay
+        }
+
+        var result = withoutAutoplay
+        let beforeClose = closeIndex > result.startIndex ? result.index(before: closeIndex) : closeIndex
+        let targetIndex = result[beforeClose] == "/" ? beforeClose : closeIndex
+        result.insert(contentsOf: " controls", at: targetIndex)
+        return result
     }
 }

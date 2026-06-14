@@ -283,8 +283,10 @@ final class BookmarkedTests: XCTestCase {
         let rewritten = await cache.localizingImages(in: html, pageURL: URL(string: "https://example.com/posts/a")!)
 
         XCTAssertTrue(rewritten.contains("<video"))
+        XCTAssertTrue(rewritten.contains(#"<video muted loop playsinline controls>"#))
         XCTAssertTrue(rewritten.contains(#"<source src="file://"#))
         XCTAssertTrue(rewritten.contains(#"data-bookmarked-original-src="https://example.com/posts/loop.mp4?t=1""#))
+        XCTAssertFalse(rewritten.localizedCaseInsensitiveContains("autoplay"))
         XCTAssertFalse(rewritten.contains(#"src="/posts/loop.mp4"#))
 
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -292,21 +294,24 @@ final class BookmarkedTests: XCTestCase {
     }
 
     func testLocalMediaPreparationKeepsVideoSourcesButRemovesPictureSources() {
-        let html = #"<article><video><source src="clip.mp4" type="video/mp4"></video><picture><source srcset="photo.avif"><img src="photo.png"></picture></article>"#
+        let html = #"<article><video autoplay muted loop><source src="clip.mp4" type="video/mp4"></video><picture><source srcset="photo.avif"><img src="photo.png"></picture></article>"#
         let prepared = html.preparedForLocalMediaDisplay()
 
+        XCTAssertTrue(prepared.contains(#"<video muted loop controls>"#))
+        XCTAssertFalse(prepared.localizedCaseInsensitiveContains("autoplay"))
         XCTAssertTrue(prepared.contains(#"<source src="clip.mp4" type="video/mp4">"#))
         XCTAssertFalse(prepared.contains(#"<source srcset="photo.avif">"#))
         XCTAssertTrue(prepared.contains(#"<img src="photo.png">"#))
     }
 
     func testRemoteMediaPreparationRestoresOriginalURLsForSyncedReaders() {
-        let html = #"<article><img src="file:///tmp/photo.png" data-bookmarked-original-src="https://example.com/photo.png"><video poster="file:///tmp/poster.jpg" data-bookmarked-original-poster="https://example.com/poster.jpg"><source src='file:///tmp/loop.mp4' data-bookmarked-original-src='https://example.com/loop.mp4'></video></article>"#
+        let html = #"<article><img src="file:///tmp/photo.png" data-bookmarked-original-src="https://example.com/photo.png"><video autoplay poster="file:///tmp/poster.jpg" data-bookmarked-original-poster="https://example.com/poster.jpg"><source src='file:///tmp/loop.mp4' data-bookmarked-original-src='https://example.com/loop.mp4'></video></article>"#
         let prepared = html.preparedForRemoteMediaDisplay()
 
         XCTAssertTrue(prepared.contains(#"<img src="https://example.com/photo.png""#))
-        XCTAssertTrue(prepared.contains(#"<video poster="https://example.com/poster.jpg""#))
+        XCTAssertTrue(prepared.contains(#"<video poster="https://example.com/poster.jpg" data-bookmarked-original-poster="https://example.com/poster.jpg" controls>"#))
         XCTAssertTrue(prepared.contains(#"<source src="https://example.com/loop.mp4""#))
+        XCTAssertFalse(prepared.localizedCaseInsensitiveContains("autoplay"))
         XCTAssertFalse(prepared.contains("file:///tmp"))
     }
 

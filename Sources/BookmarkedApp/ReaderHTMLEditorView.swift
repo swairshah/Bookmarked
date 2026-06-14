@@ -26,6 +26,7 @@ struct ReaderHTMLEditorView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.userContentController.add(context.coordinator, name: "readerHTMLEditor")
 
         let view = WKWebView(frame: .zero, configuration: configuration)

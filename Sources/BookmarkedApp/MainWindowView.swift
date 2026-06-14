@@ -1954,6 +1954,7 @@ struct WebPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = false
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.allowsBackForwardNavigationGestures = true
         context.coordinator.webView = view
@@ -2124,7 +2125,7 @@ struct WebPreview: NSViewRepresentable {
             let trimmedHTML = html?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedHTML.isEmpty || !trimmedText.isEmpty else { return nil }
-            let body = trimmedHTML.isEmpty ? "<pre>\(escape(trimmedText))</pre>" : trimmedHTML
+            let body = trimmedHTML.isEmpty ? "<pre>\(escape(trimmedText))</pre>" : trimmedHTML.preparedForLocalMediaDisplay()
             return """
             <!doctype html>
             <html>
