@@ -45,6 +45,12 @@ echo -e "${YELLOW}Building app...${NC}"
 rm -rf dist; mkdir -p dist
 ./scripts/build-app.sh
 
+# Remove local Finder/quarantine/provenance metadata from copied resources before
+# the bundle is signed. Gatekeeper can reject an otherwise valid app if those
+# attributes are sealed into the release artifact.
+echo -e "${YELLOW}Stripping extended attributes...${NC}"
+xattr -cr "$APP_PATH" 2>/dev/null || true
+
 # --- 2. Sign with Developer ID + hardened runtime -----------------------------
 echo -e "${YELLOW}Signing...${NC}"
 # SwiftPM's resource ".bundle" is a plain resource directory, not a signable
@@ -76,14 +82,16 @@ fi
 # --- 4. Build, sign, notarize, staple the DMG ---------------------------------
 echo -e "${YELLOW}Creating DMG...${NC}"
 create-dmg \
+    --skip-jenkins \
     --volname "$APP_NAME" \
     --volicon "$APP_PATH/Contents/Resources/AppIcon.icns" \
     --window-pos 200 120 --window-size 600 400 --icon-size 100 \
     --icon "$APP_NAME.app" 150 190 \
     --app-drop-link 450 185 \
     --hide-extension "$APP_NAME.app" \
-    "$DMG_PATH" "$APP_PATH" 2>&1 || true
+    "$DMG_PATH" "$APP_PATH"
 
+xattr -cr "$DMG_PATH" 2>/dev/null || true
 codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
 
 if [ "$SKIP_NOTARIZE" = false ]; then

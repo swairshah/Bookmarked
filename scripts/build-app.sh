@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 # Font flavor: set READER_FONTS=1 to build the LOCAL/personal app that defaults to
 # the licensed "Reader" serif (install it once via Font Book). Unset (the default,
@@ -92,6 +92,8 @@ echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
 swift build -c release --product bookmarked ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"}
 cp "$BINARY_PATH/bookmarked" "$APP_DIR/Contents/MacOS/bookmarkedctl"
+
+xattr -cr "$APP_DIR" 2>/dev/null || true
 
 echo "built: $APP_DIR"
 echo "built: $BINARY_PATH/bookmarked"
