@@ -158,19 +158,20 @@ struct ReaderScreen: View {
 
     private var readerOptionsPanel: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 fontScaleButton(systemImage: "textformat.size.smaller", accessibilityLabel: "Make reader text smaller") {
                     adjustScale(-ReaderFontPreferences.scaleStep)
                 }
 
                 Button {
-                    fontScale = 1.0
+                    resetScale()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 44, height: 40)
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 56, height: 48)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ReaderOptionButtonStyle())
                 .accessibilityLabel("Reset reader size")
 
                 fontScaleButton(systemImage: "textformat.size.larger", accessibilityLabel: "Make reader text larger") {
@@ -192,33 +193,39 @@ struct ReaderScreen: View {
                 HStack(spacing: 8) {
                     if let url = item.url, item.canOpenInBrowser {
                         Button {
+                            tapFeedback()
                             openURL(url)
                         } label: {
                             Image(systemName: "safari")
-                                .frame(width: 44, height: 36)
+                                .frame(width: 56, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ReaderOptionButtonStyle())
                         .accessibilityLabel("Open in Browser")
 
                         Button {
+                            tapFeedback()
                             UIPasteboard.general.url = url
                         } label: {
                             Image(systemName: "link")
-                                .frame(width: 44, height: 36)
+                                .frame(width: 56, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ReaderOptionButtonStyle())
                         .accessibilityLabel("Copy Link")
                     }
 
                     if hasNote {
                         Button {
+                            tapFeedback()
                             showingReaderOptions = false
                             showingNotes = true
                         } label: {
                             Image(systemName: "note.text")
-                                .frame(width: 44, height: 36)
+                                .frame(width: 56, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ReaderOptionButtonStyle())
                         .accessibilityLabel("View Notes")
                     }
                 }
@@ -233,9 +240,10 @@ struct ReaderScreen: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
-                .frame(width: 48, height: 40)
+                .frame(width: 56, height: 48)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ReaderOptionButtonStyle())
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -244,7 +252,34 @@ struct ReaderScreen: View {
     }
 
     private func adjustScale(_ delta: Double) {
-        fontScale = preferences.bumpedScale(by: delta)
+        let next = min(max(fontScale + delta, ReaderFontPreferences.minScale), ReaderFontPreferences.maxScale)
+        guard abs(next - fontScale) > 0.001 else {
+            boundaryFeedback()
+            return
+        }
+        tapFeedback()
+        withAnimation(.easeOut(duration: 0.12)) {
+            fontScale = next
+        }
+    }
+
+    private func resetScale() {
+        guard abs(fontScale - 1.0) > 0.001 else {
+            boundaryFeedback()
+            return
+        }
+        tapFeedback()
+        withAnimation(.easeOut(duration: 0.12)) {
+            fontScale = 1.0
+        }
+    }
+
+    private func tapFeedback() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func boundaryFeedback() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 }
 
@@ -260,6 +295,26 @@ private final class ReaderScrollTracker {
         let dy = offset - lastOffset
         guard abs(dy) > 6 else { return nil }
         return dy > 0
+    }
+}
+
+private struct ReaderOptionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? .primary : .secondary)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.18 : 0.001))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(configuration.isPressed ? 0.26 : 0.08), lineWidth: 0.5)
+            )
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(.easeOut(duration: 0.11), value: configuration.isPressed)
     }
 }
 
