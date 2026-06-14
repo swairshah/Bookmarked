@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Bookmarked Reader syncs your library with your Mac over the local network.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Bookmarked Reader uses the camera to scan the pairing QR code shown by the Mac app.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_bkmkd-sync._tcp</string>
+        <string>_bkmkd-sync._udp</string>
+    </array>
+</dict>
+</plist>

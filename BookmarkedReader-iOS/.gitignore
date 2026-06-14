@@ -1,0 +1,11 @@
+# Build output
+build/
+*.xcarchive
+*.ipa
+DerivedData/
+
+# Your personal library snapshot bundled at release time (not for committing)
+BookmarkedReader/Resources/bookmarks.json
+
+# macOS cruft
+.DS_Store

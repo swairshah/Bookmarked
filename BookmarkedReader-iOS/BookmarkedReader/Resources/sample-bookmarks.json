@@ -1,0 +1,99 @@
+[
+  {
+    "id": "824F3950-3953-45F8-9C5D-BC30181385C0",
+    "title": "Normalizing Flows: Change of Variables, Intuitively",
+    "kind": "Web Page",
+    "url": "https://blog.example.com/normalizing-flows",
+    "creator": "Danilo Rezende",
+    "sourceApp": "Safari",
+    "summary": "An intuitive walk through invertible maps, the change-of-variables formula, and affine coupling layers.",
+    "contentText": "# Normalizing Flows: Change of Variables, Intuitively\n\nA normalizing flow turns a simple base density into a complex one through an invertible map x = f(z). Because the map is invertible, we can evaluate the exact likelihood of any data point.\n\n## The change-of-variables formula\n\nTaking logs turns the product into a sum, which is what we actually optimize. The whole art is choosing f so the Jacobian determinant is cheap to compute.\n\n- Split the input into two halves.\n- Transform one half, conditioned on the other.\n- Stack many layers, alternating which half is held fixed.",
+    "readerHTML": "<p>A <em>normalizing flow</em> turns a simple base density into a complex one through an invertible, differentiable map \\( x = f(z) \\). Because the map is invertible, we can evaluate the <strong>exact</strong> likelihood of any data point — no lower bound, no sampling.</p>\n<h2>The change-of-variables formula</h2>\n<p>If \\( z \\sim p_Z \\) and \\( x = f(z) \\), the density of \\( x \\) follows from conservation of probability mass:</p>\n\\[ p_X(x) = p_Z\\!\\left(f^{-1}(x)\\right)\\,\\left|\\det \\frac{\\partial f^{-1}(x)}{\\partial x}\\right| \\]\n<p>Taking logs turns the product into a sum, which is what we actually optimize:</p>\n\\[ \\log p_X(x) = \\log p_Z\\!\\left(f^{-1}(x)\\right) + \\log\\left|\\det J_{f^{-1}}(x)\\right| \\]\n<blockquote>The entire art is choosing \\( f \\) so the Jacobian determinant is cheap to compute — ideally triangular, so the determinant is just the product of the diagonal.</blockquote>\n<h2>A minimal coupling layer</h2>\n<p>Affine coupling keeps half the dimensions fixed and uses them to parameterize an affine transform of the other half:</p>\n<pre><code>def coupling(x, mask, net):\n    x_a = x * mask\n    s, t = net(x_a)            # scale and shift\n    return x_a + (1 - mask) * (x * exp(s) + t)</code></pre>\n<ul>\n<li>Split the input into two halves.</li>\n<li>Transform one half, conditioned on the other.</li>\n<li>Stack many layers, alternating which half is held fixed.</li>\n</ul>\n<p>The log-determinant is then simply \\( \\sum_i s_i \\), and inversion is exact and in closed form.</p>",
+    "tags": [
+      "generative models",
+      "machine learning",
+      "example.com"
+    ],
+    "createdAt": "2026-06-10T18:24:00Z",
+    "updatedAt": "2026-06-10T18:24:00Z"
+  },
+  {
+    "id": "CB30C9BE-1702-4135-9DA0-29FACEBF5709",
+    "title": "karpathy/nanoGPT",
+    "kind": "GitHub Repo",
+    "url": "https://github.com/karpathy/nanoGPT",
+    "creator": "Andrej Karpathy",
+    "sourceApp": "Arc",
+    "summary": "The simplest, fastest repository for training/finetuning medium-sized GPTs.",
+    "contentText": "# karpathy/nanoGPT\n\nThe simplest, fastest repository for training/finetuning medium-sized GPTs. It is a rewrite of minGPT that prioritizes teeth over education.\n\n## install\n\n- torch, numpy, transformers, datasets, tiktoken, wandb, tqdm\n\n## quick start\n\nTrain a character-level GPT on the works of Shakespeare. First download a tiny dataset and encode it. Then train a baby GPT with a small network. On one GPU this trains in a few minutes.\n\nThe code itself is plain and readable: train.py is a ~300-line boilerplate training loop and model.py defines the GPT model definition.",
+    "tags": [
+      "github repo",
+      "github.com",
+      "llm"
+    ],
+    "createdAt": "2026-06-08T11:05:00Z",
+    "updatedAt": "2026-06-08T11:05:00Z"
+  },
+  {
+    "id": "7D0CB8A6-430D-483C-836B-6EEE3029CDDD",
+    "title": "The Power of Small Wins",
+    "kind": "Web Page",
+    "url": "https://hbr.org/2011/05/the-power-of-small-wins",
+    "creator": "Teresa Amabile & Steven Kramer",
+    "sourceApp": "Safari",
+    "summary": "Progress in meaningful work is the strongest daily motivator.",
+    "contentText": "# The Power of Small Wins\n\n## What really motivates people at work\n\nOf all the things that can boost emotions, motivation, and perceptions during a workday, the single most important is making progress in meaningful work. And the more frequently people experience that sense of progress, the more likely they are to be creatively productive in the long run.\n\n## The progress principle\n\nIf a person is motivated and happy at the end of the workday, it's a good bet that he or she made some progress. If the person drags out of the office disengaged and joyless, a setback is most likely to blame.\n\n- Setbacks loom larger than progress for many managers.\n- Small wins compound: minor milestones can produce outsized positive reactions.\n- Protecting people's inner work life is a manager's most leverage-laden job.\n\n## What managers can do\n\nScrupulously avoid impeding progress by changing goals autocratically, being indecisive, or holding up resources. Catalysts and nourishers — clear goals, autonomy, help, and respect — keep the engine running.",
+    "tags": [
+      "productivity",
+      "hbr.org"
+    ],
+    "createdAt": "2026-06-05T08:40:00Z",
+    "updatedAt": "2026-06-05T08:40:00Z"
+  },
+  {
+    "id": "1AA2C542-7619-4DBE-8ECC-BF0AAE042158",
+    "title": "A Quiet Reading Setup",
+    "kind": "Web Page",
+    "url": "https://example.com/quiet-reading",
+    "creator": "Ink & Margin",
+    "sourceApp": "Safari",
+    "summary": "What makes a reading view comfortable.",
+    "note": "Borrow the 60–75 char measure for the iOS reader.\n\nFollow up: test the serif at 18pt vs 19pt.",
+    "contentText": "A good reading setup disappears.",
+    "readerHTML": "<p>A good reading setup disappears. The page is wide enough to hold a comfortable line length, the type is set in a serif that does not fight the eye, and the chrome stays out of the way until you reach for it.</p>\n<h2>Three rules</h2>\n<ul>\n<li>Measure around 60–75 characters per line.</li>\n<li>Set body text at a size you'd choose for a paperback, not a billboard.</li>\n<li>Let the background follow the system — paper by day, ink by night.</li>\n</ul>\n<p>Everything else is decoration.</p>",
+    "tags": [
+      "design",
+      "typography",
+      "example.com"
+    ],
+    "createdAt": "2026-05-30T21:12:00Z",
+    "updatedAt": "2026-05-30T21:12:00Z"
+  },
+  {
+    "id": "3AD27312-0ADD-4E4A-B130-7526A457E97D",
+    "title": "On Attention and Reading",
+    "kind": "Podcast",
+    "url": "https://open.spotify.com/episode/0attentionreading",
+    "creator": "The Long Read",
+    "sourceApp": "Manual",
+    "summary": "How the medium shapes comprehension.",
+    "contentText": "# On Attention and Reading\n\nA conversation about how the medium shapes comprehension: why long-form reading on a calm screen beats an endless feed, and how a reader mode that strips clutter can restore the kind of sustained attention that deep reading needs.\n\nTopics: the economics of distraction, reader modes, e-ink versus LCD, and building tools that respect focus.",
+    "tags": [
+      "podcast",
+      "attention"
+    ],
+    "createdAt": "2026-05-22T07:00:00Z",
+    "updatedAt": "2026-05-22T07:00:00Z"
+  },
+  {
+    "id": "F2F1B992-51EC-4D9E-9C40-0E6C749D19FF",
+    "title": "Reading queue ideas",
+    "kind": "Note",
+    "contentText": "# Reading queue\n\nThings to read next:\n\n- The flow-matching paper (revisit the ODE derivation)\n- Two essays on attention\n- That post on triangular Jacobians\n\nKeep the list short. Finish before adding.",
+    "tags": [
+      "note"
+    ],
+    "createdAt": "2026-05-18T16:30:00Z",
+    "updatedAt": "2026-05-18T16:30:00Z"
+  }
+]
