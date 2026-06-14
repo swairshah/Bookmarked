@@ -34,10 +34,14 @@ struct ReaderHTMLView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onScroll = onScroll
+        context.coordinator.currentCSSFontSize = Self.cssFontSize(for: preferences)
         let insets = UIEdgeInsets(top: topInset, left: 0, bottom: bottomInset, right: 0)
         if webView.scrollView.contentInset != insets {
             webView.scrollView.contentInset = insets
             webView.scrollView.verticalScrollIndicatorInsets = insets
+        }
+        if abs(webView.pageZoom - 1) > 0.001 {
+            webView.pageZoom = 1
         }
         var baseScalePrefs = preferences
         baseScalePrefs.scale = 1
@@ -49,13 +53,10 @@ struct ReaderHTMLView: UIViewRepresentable {
         )
         if context.coordinator.lastDocumentKey != documentKey {
             context.coordinator.lastDocumentKey = documentKey
-            let document = Self.documentHTML(title: title, html: html, preferences: baseScalePrefs)
+            let document = Self.documentHTML(title: title, html: html, preferences: preferences)
             webView.loadHTMLString(document, baseURL: baseURL)
         }
-        let zoom = CGFloat(min(max(preferences.scale, ReaderFontPreferences.minScale), ReaderFontPreferences.maxScale))
-        if abs(webView.pageZoom - zoom) > 0.001 {
-            webView.pageZoom = zoom
-        }
+        context.coordinator.applyFontSize(to: webView)
     }
 
     static func documentHTML(title: String, html: String, preferences: ReaderFontPreferences) -> String {
@@ -75,7 +76,10 @@ struct ReaderHTMLView: UIViewRepresentable {
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
         <style>
         \(fontFaces)
-        :root { color-scheme: light dark; }
+        :root {
+          color-scheme: light dark;
+          --reader-font-size: \(cssFontSize(for: preferences));
+        }
         body {
           margin: 0;
           background: transparent;
@@ -84,7 +88,7 @@ struct ReaderHTMLView: UIViewRepresentable {
           overflow-wrap: break-word;
           word-break: break-word;
           font-family: \(preferences.cssFontFamily);
-          font-size: \(preferences.cssFontSize);
+          font-size: var(--reader-font-size);
           line-height: \(preferences.cssLineHeight);
         }
         main {
@@ -183,6 +187,12 @@ struct ReaderHTMLView: UIViewRepresentable {
         """
     }
 
+    private static func cssFontSize(for preferences: ReaderFontPreferences) -> String {
+        let scale = min(max(preferences.scale, ReaderFontPreferences.minScale), ReaderFontPreferences.maxScale)
+        let size = preferences.articleSize * scale
+        return String(format: "%.2fpx", locale: Locale(identifier: "en_US_POSIX"), size)
+    }
+
     struct DocumentKey: Equatable {
         var title: String
         var html: String
@@ -193,6 +203,7 @@ struct ReaderHTMLView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastDocumentKey: DocumentKey?
         var onScroll: ((CGFloat) -> Void)?
+        var currentCSSFontSize: String?
         private var scrollObs: NSKeyValueObservation?
 
         /// Observe scroll via KVO rather than the scroll-view delegate — WKWebView
@@ -216,6 +227,16 @@ struct ReaderHTMLView: UIViewRepresentable {
                 return
             }
             decisionHandler(.allow)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyFontSize(to: webView)
+        }
+
+        func applyFontSize(to webView: WKWebView) {
+            guard let currentCSSFontSize else { return }
+            let js = "document.documentElement.style.setProperty('--reader-font-size', '\(currentCSSFontSize)')"
+            webView.evaluateJavaScript(js, completionHandler: nil)
         }
     }
 }
