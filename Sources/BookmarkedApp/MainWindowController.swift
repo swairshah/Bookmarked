@@ -124,16 +124,42 @@ private final class BookmarkedWindow: NSWindow {
             NotificationCenter.default.post(name: .bookmarkedAdjustPreviewFontSize, object: nil, userInfo: ["delta": -1.0])
         case .scrollPostUp:
             guard !isEditingText(in: firstResponder) else { return false }
-            NotificationCenter.default.post(name: .bookmarkedScrollPostUp, object: nil)
+            if event.modifierFlags.contains(.function) {
+                NotificationCenter.default.post(name: .bookmarkedScrollPostUp, object: nil)
+            } else {
+                sendArrowKey(up: true, from: event)
+            }
         case .scrollPostDown:
             guard !isEditingText(in: firstResponder) else { return false }
-            NotificationCenter.default.post(name: .bookmarkedScrollPostDown, object: nil)
+            if event.modifierFlags.contains(.function) {
+                NotificationCenter.default.post(name: .bookmarkedScrollPostDown, object: nil)
+            } else {
+                sendArrowKey(up: false, from: event)
+            }
         case .editNotes:
             guard !isEditingText(in: firstResponder) else { return false }
             NotificationCenter.default.post(name: .bookmarkedFocusNoteEditor, object: nil)
         }
 
         return true
+    }
+
+    private func sendArrowKey(up: Bool, from event: NSEvent) {
+        let characters = String(UnicodeScalar(up ? NSUpArrowFunctionKey : NSDownArrowFunctionKey)!)
+        guard let arrowEvent = NSEvent.keyEvent(
+            with: .keyDown,
+            location: event.locationInWindow,
+            modifierFlags: event.modifierFlags.subtracting(.function),
+            timestamp: event.timestamp,
+            windowNumber: event.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: event.isARepeat,
+            keyCode: UInt16(up ? kVK_UpArrow : kVK_DownArrow)
+        ) else { return }
+
+        super.sendEvent(arrowEvent)
     }
 
     private func isEditingText(in responder: NSResponder?) -> Bool {
