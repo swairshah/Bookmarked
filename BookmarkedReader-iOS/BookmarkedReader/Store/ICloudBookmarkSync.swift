@@ -10,7 +10,14 @@ final class ICloudBookmarkSync {
     static let folderName = "Bookmarks"
 
     /// Called on the main thread whenever the synced set changes.
-    var onChange: (([BookmarkItem]) -> Void)?
+    ///
+    /// Delivers a *diff*, not a snapshot: `upserts` are the bookmarks whose files
+    /// are currently downloaded and decodable, and `knownIDs` is every bookmark id
+    /// present in the container (derived from the `<uuid>.json` filenames, so it
+    /// includes files that haven't finished downloading yet). The store upserts the
+    /// former and treats anything missing from the latter as deleted — this avoids
+    /// dropping items whose files simply haven't landed in this round of updates.
+    var onChange: ((_ upserts: [BookmarkItem], _ knownIDs: Set<UUID>) -> Void)?
 
     private var query: NSMetadataQuery?
     private let decoder: JSONDecoder
@@ -58,10 +65,18 @@ final class ICloudBookmarkSync {
         defer { q.enableUpdates() }
 
         var readyURLs: [URL] = []
+        var knownIDs = Set<UUID>()
         for i in 0..<q.resultCount {
             guard let item = q.result(at: i) as? NSMetadataItem,
                   let url = item.value(forAttribute: NSMetadataItemURLKey) as? URL,
                   url.path.contains("/Documents/\(Self.folderName)/") else { continue }
+
+            // The filename is `<uuid>.json`, so every file present in the container —
+            // downloaded or not — contributes its id to the known set. A file still
+            // downloading therefore never looks like a deletion.
+            if let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) {
+                knownIDs.insert(id)
+            }
 
             let status = item.value(forAttribute: NSMetadataUbiquitousItemDownloadingStatusKey) as? String
             if status == NSMetadataUbiquitousItemDownloadingStatusCurrent {
@@ -80,7 +95,7 @@ final class ICloudBookmarkSync {
                       let bookmark = try? decoder.decode(BookmarkItem.self, from: data) else { continue }
                 items.append(bookmark)
             }
-            DispatchQueue.main.async { self.onChange?(items) }
+            DispatchQueue.main.async { self.onChange?(items, knownIDs) }
         }
     }
 

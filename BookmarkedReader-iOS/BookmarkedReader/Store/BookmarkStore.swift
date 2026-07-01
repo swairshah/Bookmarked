@@ -70,17 +70,39 @@ final class BookmarkStore: ObservableObject {
     /// delivered at least one bookmark (so a not-yet-synced device still shows
     /// something rather than an empty list).
     private func startICloudSync() {
-        icloud.onChange = { [weak self] synced in
-            guard let self else { return }
-            guard !synced.isEmpty else {
-                if self.usingICloud { self.items = [] }   // honor deletions once iCloud is the source
-                return
-            }
-            self.usingICloud = true
-            self.items = synced
-            self.sourceDescription = "iCloud (\(synced.count))"
+        icloud.onChange = { [weak self] upserts, knownIDs in
+            self?.applyICloudSync(upserts: upserts, knownIDs: knownIDs)
         }
         icloud.start()
+    }
+
+    /// Merge an iCloud update as a diff rather than a full replace.
+    ///
+    /// `NSMetadataQuery` fires repeatedly as iCloud downloads files one at a time,
+    /// each round carrying only the subset that has landed so far. Replacing the
+    /// whole list on every round made the UI visibly empty out and refill. Instead
+    /// we upsert the decoded files by id (last-writer-wins by `updatedAt`) and only
+    /// remove items whose file is genuinely gone from the container — `knownIDs`
+    /// covers every file, including ones still downloading, so a pending download is
+    /// never mistaken for a deletion.
+    private func applyICloudSync(upserts: [BookmarkItem], knownIDs: Set<UUID>) {
+        // Wait for the first decodable payload before letting iCloud become the
+        // source of truth, so a not-yet-synced device keeps showing bundled/local
+        // data instead of flashing empty.
+        if !usingICloud {
+            guard !upserts.isEmpty else { return }
+            usingICloud = true
+            items = []   // drop the bundled/local seed; iCloud now owns the set
+        }
+
+        var byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for incoming in upserts {
+            if let existing = byID[incoming.id], existing.updatedAt > incoming.updatedAt { continue }
+            byID[incoming.id] = incoming
+        }
+        byID = byID.filter { knownIDs.contains($0.key) }   // honor deletions
+        items = byID.values.sorted { $0.createdAt > $1.createdAt }
+        sourceDescription = "iCloud (\(items.count))"
     }
 
     var recentItems: [BookmarkItem] {
