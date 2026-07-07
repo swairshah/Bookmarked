@@ -26,7 +26,6 @@ final class BookmarkStore: ObservableObject {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private let icloud = ICloudBookmarkSync()
-    private var usingICloud = false
     private var peer: PeerSync?
 
     private init() {
@@ -66,19 +65,26 @@ final class BookmarkStore: ObservableObject {
         if let data = try? encoder.encode(items) { try? data.write(to: url, options: .atomic) }
     }
 
-    /// Show bundled/local data instantly, then let iCloud take over once it has
-    /// delivered at least one bookmark (so a not-yet-synced device still shows
-    /// something rather than an empty list).
+    /// Merge iCloud deliveries into the local library instead of replacing it.
+    /// NSMetadataQuery reports whatever subset happens to be downloaded at that
+    /// moment — replacing wholesale made every launch look like "delete
+    /// everything, then re-download all articles". Upserting by id
+    /// (last-writer-wins on `updatedAt`) keeps launches incremental; deletions
+    /// propagate through peer sync, which diffs against a real manifest.
     private func startICloudSync() {
         icloud.onChange = { [weak self] synced in
-            guard let self else { return }
-            guard !synced.isEmpty else {
-                if self.usingICloud { self.items = [] }   // honor deletions once iCloud is the source
-                return
+            guard let self, !synced.isEmpty else { return }
+            var byID = Dictionary(self.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            var changed = false
+            for incoming in synced {
+                if let existing = byID[incoming.id], existing.updatedAt >= incoming.updatedAt { continue }
+                byID[incoming.id] = incoming
+                changed = true
             }
-            self.usingICloud = true
-            self.items = synced
-            self.sourceDescription = "iCloud (\(synced.count))"
+            guard changed else { return }
+            self.items = byID.values.sorted { $0.createdAt > $1.createdAt }
+            self.sourceDescription = "iCloud (\(self.items.count))"
+            self.persistToDocuments()
         }
         icloud.start()
     }
