@@ -15,7 +15,9 @@ enum ICloudMirror {
 
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // sortedKeys keeps output deterministic for the byte-compare below;
+        // compact (no prettyPrinted) keeps per-item encodes cheap.
+        e.outputFormatting = [.sortedKeys]
         e.dateEncodingStrategy = .iso8601
         return e
     }()
@@ -51,6 +53,7 @@ enum ICloudMirror {
             }
             let fm = FileManager.default
             var written = 0
+            var writeFailure: Error?
 
             var wanted = Set<String>()
             for item in items {
@@ -62,9 +65,18 @@ enum ICloudMirror {
                 // needless iCloud churn on every save.
                 let existing = try? Data(contentsOf: url)
                 if existing != data {
-                    try? data.write(to: url, options: .atomic)
-                    written += 1
+                    do {
+                        try data.write(to: url, options: .atomic)
+                        written += 1
+                    } catch {
+                        writeFailure = error
+                    }
                 }
+            }
+            if let writeFailure {
+                // Surface silent mirror failures (e.g. TCC denying writes into
+                // ~/Library/Mobile Documents) instead of pretending we synced.
+                NSLog("Bookmarked iCloud: mirror writes failing: \(writeFailure)")
             }
 
             var removed = 0
