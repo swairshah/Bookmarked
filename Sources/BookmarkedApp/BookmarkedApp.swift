@@ -210,12 +210,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
         mark("hotkeys registered")
 
-        peerSync = PeerSync(store: BookmarkStore.shared)
-        peerSync?.start()
-
         DispatchQueue.main.async {
             MainWindowController.shared.show()
             mark("main window shown")
+        }
+
+        // Resolve the sync identity off the main thread before creating
+        // PeerSync: the keychain read behind DeviceIdentity can block for
+        // several seconds (ACL evaluation), and it must not gate the window.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            _ = DeviceIdentity.publicKey   // warms DeviceIdentity's cached key
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.peerSync = PeerSync(store: BookmarkStore.shared)
+                self.peerSync?.start()
+                mark("peer sync started")
+            }
         }
     }
 
