@@ -114,7 +114,10 @@ final class PeerSync: NSObject {
     private let peerID: MCPeerID
     private let session: MCSession
     private let advertiser: MCNearbyServiceAdvertiser
-    private var lastManifest: [PeerManifestEntry] = []
+    /// What each connected peer holds (id -> updatedAt), seeded from the
+    /// manifest it sends on connect and advanced locally after every push, so
+    /// we only ever send diffs — never the whole library.
+    private var peerManifests: [MCPeerID: [UUID: Date]] = [:]
 
     private var ourNonce: [MCPeerID: Data] = [:]
     private var peerKey: [MCPeerID: Data] = [:]
@@ -172,9 +175,16 @@ final class PeerSync: NSObject {
         case .hello: handleHello(message, from: peer)
         case .proof: handleProof(message, from: peer)
         case .manifest:
-            guard ready.contains(peer) else { return }
-            lastManifest = message.manifest ?? []
-            pushDiff()
+            // Buffer the manifest even if the peer isn't fully authenticated
+            // yet — it can arrive before our own handshake finishes. maybeReady
+            // pushes once both the handshake and the manifest are in.
+            peerManifests[peer] = Dictionary(
+                (message.manifest ?? []).map { ($0.id, $0.updatedAt) },
+                uniquingKeysWith: { a, _ in a }
+            )
+            if ready.contains(peer) {
+                pushDiff(to: peer)
+            }
         case .push:
             break
         }
@@ -244,7 +254,11 @@ final class PeerSync: NSObject {
         guard authenticated.contains(peer), authorized.contains(peer), !ready.contains(peer) else { return }
         ready.insert(peer)
         publishPeerCount()
-        pushDiff()
+        // Only push once the peer's manifest is known — pushing here with no
+        // manifest would resend the entire library on every connect.
+        if peerManifests[peer] != nil {
+            pushDiff(to: peer)
+        }
     }
 
     @MainActor
@@ -258,28 +272,36 @@ final class PeerSync: NSObject {
         ourNonce[peer] = nil
         peerKey[peer] = nil
         peerFingerprint[peer] = nil
+        peerManifests[peer] = nil
         authenticated.remove(peer)
         authorized.remove(peer)
         ready.remove(peer)
-        if ready.isEmpty { lastManifest = [] }
         publishPeerCount()
     }
 
     @MainActor
     private func pushDiff() {
-        guard let store else { return }
-        let peers = session.connectedPeers.filter { ready.contains($0) }
-        guard !peers.isEmpty else { return }
-        let remote = Dictionary(lastManifest.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
+        for peer in session.connectedPeers where ready.contains(peer) {
+            pushDiff(to: peer)
+        }
+    }
+
+    @MainActor
+    private func pushDiff(to peer: MCPeerID) {
+        guard let store, ready.contains(peer), var remote = peerManifests[peer] else { return }
         let items = store.items
         let upserts = items.filter { item in
             guard let theirs = remote[item.id] else { return true }
             return item.updatedAt > theirs
         }
         let localIDs = Set(items.map { $0.id })
-        let deletes = lastManifest.map { $0.id }.filter { !localIDs.contains($0) }
+        let deletes = remote.keys.filter { !localIDs.contains($0) }
         guard !upserts.isEmpty || !deletes.isEmpty else { return }
-        send(PeerMessage(kind: .push, upserts: upserts, deletes: deletes), to: peers)
+        send(PeerMessage(kind: .push, upserts: upserts, deletes: Array(deletes)), to: [peer])
+        // Advance our view of the peer so later pushes stay incremental.
+        for item in upserts { remote[item.id] = item.updatedAt }
+        for id in deletes { remote.removeValue(forKey: id) }
+        peerManifests[peer] = remote
         SyncStatus.shared.markSynced()
     }
 
