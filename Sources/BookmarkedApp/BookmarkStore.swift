@@ -318,6 +318,12 @@ final class BookmarkStore: ObservableObject {
                 cacheWebPage(for: item.id, url: url)
             }
         } catch {
+            // A failed refresh must not create a duplicate of the item it was
+            // supposed to replace.
+            if id != nil {
+                statusMessage = "Refresh failed: \(error.localizedDescription)"
+                return
+            }
             let kind = BookmarkClassifier.classify(url: url)
             _ = add(BookmarkDraft(
                 title: titleHint.isEmpty ? (url.host ?? url.absoluteString) : titleHint,
