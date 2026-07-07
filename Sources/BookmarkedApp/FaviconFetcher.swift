@@ -1,6 +1,20 @@
 import AppKit
 import Foundation
 
+/// Decoded-favicon cache so list rows don't re-decode image bytes on every
+/// render pass.
+enum FaviconImageCache {
+    private static let cache = NSCache<NSData, NSImage>()
+
+    static func image(for data: Data) -> NSImage? {
+        let key = data as NSData
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let image = NSImage(data: data) else { return nil }
+        cache.setObject(image, forKey: key)
+        return image
+    }
+}
+
 enum FaviconFetcher {
     static func fetch(for url: URL) async -> Data? {
         guard let host = url.host, !host.isEmpty else { return nil }

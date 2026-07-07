@@ -164,11 +164,13 @@ struct MainWindowView: View {
                 controller.selection = results.first?.id
             }
         }
-        .onChange(of: results) { newValue in
-            if let selection = controller.selection, newValue.contains(where: { $0.id == selection }) {
+        .onChange(of: results.map(\.id)) { ids in
+            // Compare ids only — diffing full items deep-compares megabytes of
+            // article text on every view update.
+            if let selection = controller.selection, ids.contains(selection) {
                 return
             }
-            controller.selection = newValue.first?.id
+            controller.selection = ids.first
         }
         .onReceive(NotificationCenter.default.publisher(for: .bookmarkedSelectPreviousItem)) { _ in
             moveSelection(by: -1)
@@ -1077,7 +1079,7 @@ struct BookmarkDetailView: View {
 
     private var compactHeader: some View {
         HStack(spacing: 10) {
-            if let data = item.faviconData, let image = NSImage(data: data) {
+            if let data = item.faviconData, let image = FaviconImageCache.image(for: data) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -1164,7 +1166,7 @@ struct BookmarkDetailView: View {
     private var expandedHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                if let data = item.faviconData, let image = NSImage(data: data) {
+                if let data = item.faviconData, let image = FaviconImageCache.image(for: data) {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -1902,7 +1904,7 @@ struct BookmarkIcon: View {
 
     var body: some View {
         Group {
-            if let data = item.faviconData, let image = NSImage(data: data) {
+            if let data = item.faviconData, let image = FaviconImageCache.image(for: data) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
