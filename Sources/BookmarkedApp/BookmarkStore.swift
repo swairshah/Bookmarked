@@ -6,7 +6,12 @@ import AppKit
 final class BookmarkStore: ObservableObject {
     static let shared = BookmarkStore()
 
-    @Published private(set) var items: [BookmarkItem] = []
+    @Published private(set) var items: [BookmarkItem] = [] {
+        didSet {
+            itemsVersion += 1
+            searchResultCache = nil
+        }
+    }
     @Published private(set) var isCapturing = false
     @Published private(set) var flashToken = 0
     @Published var statusMessage: String?
@@ -17,7 +22,19 @@ final class BookmarkStore: ObservableObject {
     private let ioQueue = DispatchQueue(label: "bookmarked.store.io", qos: .utility)
     private var saveWorkItem: DispatchWorkItem?
     private var imageLocalizationTasks = Set<UUID>()
-    private var webPageCacheTasks = Set<UUID>()
+
+    // Session-scoped guards so row appearances don't re-trigger the same
+    // (possibly failing) asset work on every scroll.
+    private var faviconFetchAttempts = Set<UUID>()
+    private var autoRefreshAttempts = Set<UUID>()
+    private var imageLocalizationChecked = Set<UUID>()
+    private var webPageCacheAttempts = Set<UUID>()
+
+    // Search caches: per-item lowercased haystacks (rebuilt only when the item
+    // changes) and the last query's results (invalidated on any items change).
+    private var searchTextCache: [UUID: (updatedAt: Date, text: String)] = [:]
+    private var itemsVersion = 0
+    private var searchResultCache: (version: Int, query: String, results: [BookmarkItem])?
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -26,7 +43,9 @@ final class BookmarkStore: ObservableObject {
         fileURL = dir.appendingPathComponent("bookmarks.json")
 
         encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // Compact output: pretty-printing a multi-MB library measurably slows
+        // every debounced save and bloats the file.
+        encoder.outputFormatting = [.sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
 
         decoder = JSONDecoder()
@@ -49,25 +68,43 @@ final class BookmarkStore: ObservableObject {
 
     func search(_ query: String) -> [BookmarkItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = recentItems
-        guard !trimmed.isEmpty else { return source }
-        let tokens = trimmed.lowercased().split(separator: " ").map(String.init)
-        return source.filter { item in
-            let haystack = [
-                item.title,
-                item.kind.rawValue,
-                item.creator ?? "",
-                item.sourceApp ?? "",
-                item.summary ?? "",
-                item.note ?? "",
-                item.url?.absoluteString ?? "",
-                item.fileURL?.path ?? "",
-                item.tags.joined(separator: " "),
-                item.contentText,
-                Self.searchDateFormatter.string(from: item.createdAt)
-            ].joined(separator: " ").lowercased()
-            return tokens.allSatisfy { haystack.contains($0) }
+        if let cached = searchResultCache, cached.version == itemsVersion, cached.query == trimmed {
+            return cached.results
         }
+        let source = recentItems
+        let results: [BookmarkItem]
+        if trimmed.isEmpty {
+            results = source
+        } else {
+            let tokens = trimmed.lowercased().split(separator: " ").map(String.init)
+            results = source.filter { item in
+                let haystack = searchableText(for: item)
+                return tokens.allSatisfy { haystack.contains($0) }
+            }
+        }
+        searchResultCache = (itemsVersion, trimmed, results)
+        return results
+    }
+
+    private func searchableText(for item: BookmarkItem) -> String {
+        if let cached = searchTextCache[item.id], cached.updatedAt == item.updatedAt {
+            return cached.text
+        }
+        let text = [
+            item.title,
+            item.kind.rawValue,
+            item.creator ?? "",
+            item.sourceApp ?? "",
+            item.summary ?? "",
+            item.note ?? "",
+            item.url?.absoluteString ?? "",
+            item.fileURL?.path ?? "",
+            item.tags.joined(separator: " "),
+            item.contentText,
+            Self.searchDateFormatter.string(from: item.createdAt)
+        ].joined(separator: " ").lowercased()
+        searchTextCache[item.id] = (item.updatedAt, text)
+        return text
     }
 
     @discardableResult
@@ -217,13 +254,18 @@ final class BookmarkStore: ObservableObject {
         }
         items[idx].readerEditedAt = Date()
         items[idx].updatedAt = Date()
+        imageLocalizationChecked.remove(itemID)
         scheduleSave()
         statusMessage = "Saved reader edits"
     }
 
     func ensureAssets(for item: BookmarkItem) {
-        let hasValidFavicon = item.faviconData.map(FaviconFetcher.isRenderableImage) ?? false
-        if !hasValidFavicon, let url = item.url {
+        // Each branch runs at most once per item per app session. Without these
+        // guards, any item whose fetch fails (no favicon, dead page, offline)
+        // retries the network on every single row appearance.
+        if !faviconFetchAttempts.contains(item.id), let url = item.url,
+           !(item.faviconData.map(FaviconFetcher.isRenderableImage) ?? false) {
+            faviconFetchAttempts.insert(item.id)
             Task {
                 guard let data = await FaviconFetcher.fetch(for: url) else { return }
                 await MainActor.run {
@@ -235,14 +277,20 @@ final class BookmarkStore: ObservableObject {
             }
         }
 
-        if item.readerHTML == nil, item.readerEditedAt == nil, item.url != nil, (item.kind == .webPage || item.kind == .githubRepo) {
+        if item.readerHTML == nil, item.readerEditedAt == nil, item.url != nil,
+           (item.kind == .webPage || item.kind == .githubRepo),
+           !autoRefreshAttempts.contains(item.id) {
+            autoRefreshAttempts.insert(item.id)
             refresh(item)
         }
 
         if let url = item.url,
            let html = item.readerHTML,
-           ReaderImageCache.shared.hasRemoteImages(in: html, pageURL: url) {
-            localizeReaderImages(for: item.id, html: html, pageURL: url)
+           !imageLocalizationChecked.contains(item.id) {
+            imageLocalizationChecked.insert(item.id)
+            if ReaderImageCache.shared.hasRemoteImages(in: html, pageURL: url) {
+                localizeReaderImages(for: item.id, html: html, pageURL: url)
+            }
         }
 
         if BookmarkedRuntimePreferences.cacheWebPages,
@@ -310,6 +358,7 @@ final class BookmarkStore: ObservableObject {
                 items[idx].faviconData = draft.faviconData ?? items[idx].faviconData
                 items[idx].tags = draft.tags
                 items[idx].updatedAt = Date()
+                imageLocalizationChecked.remove(id)
                 scheduleSave()
                 statusMessage = "Refreshed bookmark"
                 cacheWebPage(for: id, url: url)
@@ -363,15 +412,12 @@ final class BookmarkStore: ObservableObject {
 
     private func cacheWebPage(for itemID: UUID, url: URL) {
         guard BookmarkedRuntimePreferences.cacheWebPages,
-              !webPageCacheTasks.contains(itemID) else {
+              !webPageCacheAttempts.contains(itemID) else {
             return
         }
-        webPageCacheTasks.insert(itemID)
+        webPageCacheAttempts.insert(itemID)
         Task {
             _ = await WebPageCache.shared.cache(url: url)
-            await MainActor.run {
-                _ = self.webPageCacheTasks.remove(itemID)
-            }
         }
     }
 
@@ -412,12 +458,12 @@ final class BookmarkStore: ObservableObject {
             } catch {
                 NSLog("Bookmarked: failed to save bookmarks.json: \(error)")
             }
+            // Mirror per-bookmark files into iCloud for incremental cross-device
+            // sync — inside the debounce so a burst of edits mirrors once.
+            ICloudMirror.sync(snapshot)
         }
         saveWorkItem = work
-        ioQueue.asyncAfter(deadline: .now() + 0.2, execute: work)
-
-        // Mirror per-bookmark files into iCloud for incremental cross-device sync.
-        ICloudMirror.sync(snapshot)
+        ioQueue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     private static let searchDateFormatter: DateFormatter = {
